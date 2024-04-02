@@ -2972,9 +2972,19 @@ export class TableRenderer extends Table {
           args.condition,
           args.selected
         );
+
+        const replaceSelectedFlag =
+          args?.replaceSelected !== undefined
+            ? await evalExpressionWithConditionBuilder(
+                args?.replaceSelected,
+                {}
+              )
+            : true;
+
         store.updateSelected(
           rows.map(item => item.data),
-          valueField
+          valueField,
+          replaceSelectedFlag
         );
         break;
       case 'initDrag':
