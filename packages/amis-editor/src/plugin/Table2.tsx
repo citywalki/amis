@@ -511,7 +511,7 @@ export class Table2Plugin extends BasePlugin {
     return super.getRendererInfo(context);
   }
 
-  filterProps(props: any) {
+  filterProps(props: any, node: EditorNodeType) {
     const arr = resolveArrayDatasource(props);
     const getFooterSummary = (text: string) => ({
       type: 'alert',
@@ -604,6 +604,16 @@ export class Table2Plugin extends BasePlugin {
 
       props.expandable.keyField = 'id';
       props.expandable.expandedRowKeys = [1];
+    }
+
+    if (props.value) {
+      if (!node.state.value) {
+        node.updateState({
+          value: props.value
+        });
+      }
+
+      delete props.value;
     }
 
     return props;
@@ -770,7 +780,7 @@ export class Table2Plugin extends BasePlugin {
     primaryField: context => {
       return getSchemaTpl('primaryField', {
         /** CRUD下，该项配置提升到CRUD中 */
-        hiddenOn: `data.type && (data.type === "crud" || data.type === "crud2")`
+        hiddenOn: `this.type && (this.type === "crud" || this.type === "crud2")`
       });
     },
     quickSaveApi: context => {
@@ -991,19 +1001,6 @@ export class Table2Plugin extends BasePlugin {
                 title: '行设置',
                 body: [
                   {
-                    name: 'lineHeight',
-                    label: '行高度',
-                    type: 'select',
-                    placeholder: '请选择高度',
-                    options: [
-                      {label: '跟随内容', value: ''},
-                      {label: '高', value: 'large'},
-                      {label: '中', value: 'middle'}
-                    ],
-                    clearable: false,
-                    value: ''
-                  },
-                  {
                     type: 'ae-Switch-More',
                     mode: 'normal',
                     name: 'rowSelection',
@@ -1160,7 +1157,7 @@ export class Table2Plugin extends BasePlugin {
                         },
                         getSchemaTpl('formulaControl', {
                           name: 'expandable.expandableOn',
-                          visibleOn: 'data.expandable',
+                          visibleOn: 'this.expandable',
                           label: '可展开条件'
                         }),
                         {
@@ -1270,13 +1267,13 @@ export class Table2Plugin extends BasePlugin {
                       '默认切换页面、搜索后，用户选择项会被清空，开启此功能后会保留用户选择，可以实现跨页面批量操作。'
                     ),
                     /** 目前仅支持2种类型，默认是 pagination */
-                    visibleOn: '!data.loadType || data.loadType !== "more"'
+                    visibleOn: '!this.loadType || this.loadType !== "more"'
                   }),
                   {
                     name: 'maxKeepItemSelectionLength',
                     type: 'input-number',
                     label: '最大选择条数',
-                    visibleOn: 'data.keepItemSelectionOnPageChange'
+                    visibleOn: 'this.keepItemSelectionOnPageChange'
                   }
                 ]
               },
@@ -1327,31 +1324,31 @@ export class Table2Plugin extends BasePlugin {
             {
               title: '基本',
               body: [
-                getSchemaTpl('switch', {
-                  name: 'bordered',
-                  label: '边框',
-                  pipeIn: defaultValue(false)
-                }),
-                {
-                  name: 'size',
-                  label: '控件尺寸',
-                  type: 'select',
-                  pipeIn: defaultValue('default'),
-                  options: [
-                    {
-                      label: '小',
-                      value: 'small'
-                    },
-                    {
-                      label: '默认',
-                      value: 'default'
-                    },
-                    {
-                      label: '大',
-                      value: 'large'
-                    }
-                  ]
-                },
+                // getSchemaTpl('switch', {
+                //   name: 'bordered',
+                //   label: '边框',
+                //   pipeIn: defaultValue(false)
+                // }),
+                // {
+                //   name: 'size',
+                //   label: '控件尺寸',
+                //   type: 'select',
+                //   pipeIn: defaultValue('default'),
+                //   options: [
+                //     {
+                //       label: '小',
+                //       value: 'small'
+                //     },
+                //     {
+                //       label: '默认',
+                //       value: 'default'
+                //     },
+                //     {
+                //       label: '大',
+                //       value: 'large'
+                //     }
+                //   ]
+                // },
                 getSchemaTpl('switch', {
                   name: 'autoFillHeight',
                   label: '高度自适应'
@@ -1374,20 +1371,10 @@ export class Table2Plugin extends BasePlugin {
                   ]
                 },
                 {
-                  type: 'input-group',
-                  visibleOn: 'data.scroll && data.scroll.y !== null',
-                  label: '高度值',
-                  body: [
-                    {
-                      type: 'input-number',
-                      name: 'scroll.y'
-                    },
-                    {
-                      type: 'tpl',
-                      addOnclassName: 'border-0 bg-none',
-                      tpl: 'px'
-                    }
-                  ]
+                  type: 'amis-theme-select',
+                  name: 'scroll.y',
+                  visibleOn: 'this.scroll && this.scroll.y !== null',
+                  label: '高度值'
                 },
 
                 {
@@ -1412,25 +1399,14 @@ export class Table2Plugin extends BasePlugin {
                   ]
                 },
                 {
-                  type: 'input-group',
-                  visibleOn: 'data.scroll && data.scroll.x !== null',
+                  type: 'amis-theme-select',
                   name: 'scroll.x',
-                  label: '宽度值',
-                  body: [
-                    {
-                      type: 'input-number',
-                      name: 'scroll.x'
-                    },
-                    {
-                      type: 'tpl',
-                      addOnclassName: 'border-0 bg-none',
-                      tpl: 'px'
-                    }
-                  ]
+                  visibleOn: 'this.scroll && this.scroll.x !== null',
+                  label: '宽度值'
                 },
                 {
                   name: 'indentSize',
-                  visibleOn: 'data.childrenColumnName',
+                  visibleOn: 'this.childrenColumnName',
                   type: 'input-number',
                   unitOptions: [{label: 'px', value: 'px'}],
                   label: tipedLabel(
@@ -1440,21 +1416,100 @@ export class Table2Plugin extends BasePlugin {
                 },
                 {
                   name: 'rowSelection.columnWidth',
-                  visibleOn: 'data.rowSelection',
+                  visibleOn: 'this.rowSelection',
                   type: 'input-number',
                   label: '选择列宽度',
                   description: '固定选择列的宽度'
                 },
                 {
                   name: 'expandable.columnWidth',
-                  visibleOn: 'data.expandable',
+                  visibleOn: 'this.expandable',
                   type: 'input-number',
                   label: '展开列宽度',
                   description: '固定展开列的宽度'
                 }
               ]
             },
+            {
+              title: '表头',
+              body: [
+                getSchemaTpl('theme:colorPicker', {
+                  name: 'themeCss.tableHeadClassname.background',
+                  needCustom: true,
+                  needGradient: true,
+                  needImage: true,
+                  labelMode: 'input',
+                  label: '背景',
+                  editorValueToken: '--table-header-bg-color'
+                }),
+                getSchemaTpl('theme:paddingAndMargin', {
+                  name: 'themeCss.tableHeadClassname.paddingAndMargin',
+                  hideMargin: true,
+                  editorValueToken: '--table'
+                }),
+                getSchemaTpl('theme:border', {
+                  name: 'themeCss.tableHeadClassname.border',
+                  label: '边框',
+                  editorValueToken: {
+                    'rightBorderColor': '--Table-thead-borderColor',
+                    'rightBorderWidth': '--Table-thead-borderWidth',
+                    '*': '--table-header'
+                  }
+                }),
+                getSchemaTpl('theme:font', {
+                  name: 'themeCss.tableHeadClassname.font',
+                  hasVertical: false,
+                  textAlign: false,
+                  editorValueToken: '--table-header'
+                })
+              ]
+            },
 
+            getSchemaTpl('theme:base', {
+              title: '单元格',
+              classname: 'tableBodyClassname',
+              editorValueToken: '--table-body',
+              hideShadow: true,
+              hideRadius: true,
+              hideBorder: true,
+              hidePaddingAndMargin: true,
+              state: ['default', 'hover'],
+              extra: [
+                {
+                  type: 'amis-theme-select',
+                  label: '行高',
+                  name: 'themeCss.tableBodyClassname.height',
+                  editorValueToken: '--table-body-line-height',
+                  mode: 'default'
+                },
+                getSchemaTpl('theme:paddingAndMargin', {
+                  name: 'themeCss.tableRowClassname.paddingAndMargin',
+                  hideMargin: true,
+                  editorValueToken: '--table'
+                }),
+                getSchemaTpl('theme:border', {
+                  name: 'themeCss.tableRowClassname.border',
+                  editorValueToken: {
+                    'bottomBorderColor': '--Table-borderColor',
+                    'bottomBorderWidth': '--Table-borderWidth',
+                    '*': '--table'
+                  }
+                }),
+                getSchemaTpl('theme:font', {
+                  name: 'themeCss.tableBodyClassname.font',
+                  editorValueToken: '--table-body'
+                })
+              ]
+            }),
+            {
+              title: '自定义样式',
+              body: [
+                {
+                  type: 'theme-cssCode',
+                  label: false
+                }
+              ]
+            },
             getSchemaTpl('style:classNames', {
               isFormItem: false,
               schema: [
@@ -1468,7 +1523,7 @@ export class Table2Plugin extends BasePlugin {
                 }),
                 getSchemaTpl('formulaControl', {
                   name: 'expandable.expandedRowClassNameExpr',
-                  visibleOn: 'data.expandable',
+                  visibleOn: 'this.expandable',
                   label: '展开行样式'
                 })
               ]

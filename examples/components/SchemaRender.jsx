@@ -3,7 +3,7 @@ import {render, toast, makeTranslator, LazyComponent, Drawer} from 'amis';
 import axios from 'axios';
 import Portal from 'react-overlays/Portal';
 import {normalizeLink} from 'amis-core';
-import {withRouter} from 'react-router';
+import {withRouter} from 'react-router-dom';
 import copy from 'copy-to-clipboard';
 import {qsparse, parseQuery, attachmentAdpator} from 'amis-core';
 import isPlainObject from 'lodash/isPlainObject';
@@ -248,6 +248,10 @@ export default function (schema, schemaProps, showCode, envOverrides) {
           },
           // 是否开启测试 testid
           // enableTestid: true,
+          // pdfjsWorkerSrc: new URL(
+          //   'pdfjs-dist/build/pdf.worker.min.mjs',
+          //   import.meta.url
+          // ).toString(),
           ...envOverrides
         };
 

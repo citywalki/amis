@@ -295,26 +295,16 @@ function DialogActionPanel({
       if (refIds.length) {
         let refKey = '';
         [schema, refKey] = addModal(schema, currentModal.modal);
-        schema = JSONUpdate(
-          schema,
-          actionSchema.$$id,
-          {
-            [modalType]: JSONPipeIn({
-              $ref: refKey
-            })
-          },
-          true
-        );
+        schema = JSONUpdate(schema, actionSchema.$$id, {
+          [modalType]: JSONPipeIn({
+            $ref: refKey
+          })
+        });
         refIds.forEach(refId => {
-          schema = JSONUpdate(
-            schema,
-            refId,
-            {
-              $ref: refKey,
-              $$originId: undefined
-            },
-            true
-          );
+          schema = JSONUpdate(schema, refId, {
+            $ref: refKey,
+            $$originId: undefined
+          });
         });
       }
 
@@ -507,19 +497,30 @@ function DialogActionPanel({
           arr = members.concat();
         }
 
-        const {$$originId, ...modal} = definitions[key];
+        const {$$originId, ...definition} = definitions[key];
+
+        // 当前弹窗不需要合并
+        if (
+          $$originId === modal.$$id ||
+          (definition.$$ref && definition.$$ref === modal.$$ref)
+        ) {
+          return;
+        }
+
         const idx = arr.findIndex(item =>
           $$originId
             ? (item.modal.$$originId || item.modal.$$id) === $$originId
             : item.modal.$$ref === key
         );
         const label = `${
-          modal.editorSetting?.displayName || modal.title || '未命名弹窗'
+          definition.editorSetting?.displayName ||
+          definition.title ||
+          '未命名弹窗'
         }`;
         const tip =
-          (modal as any).actionType === 'confirmDialog'
+          (definition as any).actionType === 'confirmDialog'
             ? '确认框'
-            : modal.type === 'drawer'
+            : definition.type === 'drawer'
             ? '抽屉弹窗'
             : '弹窗';
 
@@ -528,7 +529,7 @@ function DialogActionPanel({
             ...arr[idx],
             label: label,
             tip: tip,
-            modal: {...modal, $$ref: key, $$originId},
+            modal: {...definition, $$ref: key, $$originId},
             isModified: true,
             isRefered: refs.includes(key)
           });
@@ -539,9 +540,9 @@ function DialogActionPanel({
           arr.push({
             label,
             tip,
-            value: modal.$$id,
+            value: definition.$$id,
             modal: JSONPipeIn({
-              ...modal,
+              ...definition,
               $$ref: key
             }),
             isModified: true

@@ -3,7 +3,7 @@ import {RendererProps} from '../factory';
 import {ConditionGroupValue, Api, SchemaNode} from '../types';
 import {createObject} from '../utils/helper';
 import {RendererEvent} from '../utils/renderer-event';
-import {evalExpressionWithConditionBuilder} from '../utils/tpl';
+import {evalExpressionWithConditionBuilderAsync} from '../utils/tpl';
 import {dataMapping} from '../utils/tpl-builtin';
 import {IBreakAction} from './BreakAction';
 import {IContinueAction} from './ContinueAction';
@@ -221,11 +221,13 @@ export const runAction = async (
   let action: ListenerAction = {...actionConfig};
   action.args = {...actionConfig.args};
 
+  const rendererProto = renderer.props.getData?.() ?? renderer.props.data;
+
   // __rendererData默认为renderer.props.data，兼容表单项值变化时的data读取
   if (!event.data?.__rendererData) {
     additional = {
       event,
-      __rendererData: renderer.props.data // 部分组件交互后会有更新，如果想要获取那部分数据，可以通过事件数据获取
+      __rendererData: rendererProto // 部分组件交互后会有更新，如果想要获取那部分数据，可以通过事件数据获取
     };
   }
 
@@ -234,10 +236,10 @@ export const runAction = async (
   // 注意：并行ajax请求结果必须通过event取值
   const mergeData = createObject(
     createObject(
-      renderer.props.data.__super
-        ? createObject(renderer.props.data.__super, additional)
+      rendererProto.__super
+        ? createObject(rendererProto.__super, additional)
         : additional,
-      renderer.props.data
+      rendererProto
     ),
     event.data
   );
@@ -247,7 +249,7 @@ export const runAction = async (
   let isStop = false;
 
   if (expression) {
-    isStop = !(await evalExpressionWithConditionBuilder(
+    isStop = !(await evalExpressionWithConditionBuilderAsync(
       expression,
       mergeData,
       true
@@ -261,7 +263,7 @@ export const runAction = async (
   // 支持表达式 >=1.10.0
   let preventDefault = false;
   if (action.preventDefault) {
-    preventDefault = await evalExpressionWithConditionBuilder(
+    preventDefault = await evalExpressionWithConditionBuilderAsync(
       action.preventDefault,
       mergeData,
       false
@@ -362,7 +364,7 @@ export const runAction = async (
 
   let stopPropagation = false;
   if (action.stopPropagation) {
-    stopPropagation = await evalExpressionWithConditionBuilder(
+    stopPropagation = await evalExpressionWithConditionBuilderAsync(
       action.stopPropagation,
       mergeData,
       false

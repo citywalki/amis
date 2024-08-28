@@ -14,7 +14,11 @@ import {compile} from 'path-to-regexp';
 
 import type {Schema, PlainObject, FunctionPropertyNames} from '../types';
 
-import {evalExpression, filter} from './tpl';
+import {
+  evalExpression,
+  evalExpressionWithConditionBuilder,
+  filter
+} from './tpl';
 import {IIRendererStore} from '../store';
 import {IFormStore} from '../store/form';
 import {autobindMethod} from './autobind';
@@ -36,6 +40,8 @@ import {string2regExp} from './string2regExp';
 import {getVariable} from './getVariable';
 import {keyToPath} from './keyToPath';
 import {isExpression, replaceExpression} from './formula';
+import type {IStatusStore} from '../store/status';
+import {isAlive} from 'mobx-state-tree';
 
 export {
   createObject,
@@ -114,7 +120,11 @@ export function syncDataFromSuper(
   let keys: Array<string> = [];
 
   // 如果是 form store，则从父级同步 formItem 种东西。
-  if (store && store.storeType === 'FormStore') {
+  if (
+    store &&
+    store.storeType === 'FormStore' &&
+    (store as any).canAccessSuperData !== false
+  ) {
     keys = uniq(
       (store as IFormStore).items
         .map(item => `${item.name}`.replace(/\..*$/, ''))
@@ -202,7 +212,9 @@ export function anyChanged(
     typeof attrs === 'string'
       ? attrs.split(',').map(item => item.trim())
       : attrs
-  ).some(key => (strictMode ? from[key] !== to[key] : from[key] != to[key]));
+  ).some(key =>
+    strictMode ? !Object.is(from[key], to[key]) : from[key] != to[key]
+  );
 }
 
 type Mutable<T> = {
@@ -223,7 +235,9 @@ export function changedEffect<T extends Record<string, any>>(
       : attrs;
 
   keys.forEach(key => {
-    if (strictMode ? origin[key] !== data[key] : origin[key] != data[key]) {
+    if (
+      strictMode ? !Object.is(origin[key], data[key]) : origin[key] != data[key]
+    ) {
       (changes as any)[key] = data[key];
     }
   });
@@ -423,18 +437,37 @@ export function hasVisibleExpression(schema: {
 
 export function isVisible(
   schema: {
+    id?: string;
+    name?: string;
     visibleOn?: string;
     hiddenOn?: string;
     visible?: boolean;
     hidden?: boolean;
   },
-  data?: object
+  data?: object,
+  statusStore?: IStatusStore
 ) {
+  // 有状态时，状态优先
+  if ((schema.id || schema.name) && statusStore) {
+    const id = filter(schema.id, data);
+    const name = filter(schema.name, data);
+
+    const visible = isAlive(statusStore)
+      ? statusStore.visibleState[id] ?? statusStore.visibleState[name]
+      : undefined;
+
+    if (typeof visible !== 'undefined') {
+      return visible;
+    }
+  }
+
   return !(
     schema.hidden ||
     schema.visible === false ||
-    (schema.hiddenOn && evalExpression(schema.hiddenOn, data)) ||
-    (schema.visibleOn && !evalExpression(schema.visibleOn, data))
+    (schema.hiddenOn &&
+      evalExpressionWithConditionBuilder(schema.hiddenOn, data)) ||
+    (schema.visibleOn &&
+      !evalExpressionWithConditionBuilder(schema.visibleOn, data))
   );
 }
 
@@ -479,7 +512,8 @@ export function isDisabled(
 ) {
   return (
     schema.disabled ||
-    (schema.disabledOn && evalExpression(schema.disabledOn, data))
+    (schema.disabledOn &&
+      evalExpressionWithConditionBuilder(schema.disabledOn, data))
   );
 }
 
@@ -492,7 +526,7 @@ export function hasAbility(
   return schema.hasOwnProperty(ability)
     ? schema[ability]
     : schema.hasOwnProperty(`${ability}On`)
-    ? evalExpression(schema[`${ability}On`], data || schema)
+    ? evalExpressionWithConditionBuilder(schema[`${ability}On`], data || schema)
     : defaultValue;
 }
 
@@ -626,7 +660,11 @@ export function difference<
         }
 
         // isEquals 里面没有处理好递归引用对象的情况
-        if (!isObjectShallowModified(a, b, false, undefined, undefined, 10)) {
+        if (
+          object.hasOwnProperty(key) && // 其中一个不是自己的属性，就不要比对了
+          base.hasOwnProperty(key) &&
+          !isObjectShallowModified(a, b, true, undefined, undefined, 10)
+        ) {
           return;
         }
 
@@ -2327,5 +2365,14 @@ export class TestIdBuilder {
     }
 
     return data ? filter(this.testId, data) : this.testId;
+  }
+}
+
+export function supportsMjs() {
+  try {
+    new Function('import("")');
+    return true;
+  } catch (e) {
+    return false;
   }
 }

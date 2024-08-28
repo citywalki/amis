@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "types": ["node"],
     "rootDir": "./",
     "outDir": "./dist",
     "baseUrl": "./",
@@ -14,6 +15,6 @@
     ],
     "paths": {}
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "tools/functionCount.ts"],
   "references": []
 }

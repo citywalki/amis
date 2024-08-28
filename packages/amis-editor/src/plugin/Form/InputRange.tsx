@@ -160,7 +160,7 @@ export class RangeControlPlugin extends BasePlugin {
     {
       actionType: 'reset',
       actionLabel: '重置',
-      description: '将值重置为resetValue，若没有配置resetValue，则清空'
+      description: '将值重置为初始值'
     },
     {
       actionType: 'setValue',
@@ -205,7 +205,7 @@ export class RangeControlPlugin extends BasePlugin {
               {
                 type: 'container',
                 className: 'ae-sub-content',
-                visibleOn: 'data.multiple',
+                visibleOn: 'this.multiple',
                 body: [
                   getSchemaTpl('joinValues', {
                     onChange: (
@@ -233,7 +233,8 @@ export class RangeControlPlugin extends BasePlugin {
                 type: 'ae-input-range-value',
                 name: 'value',
                 label: '默认值',
-                visibleOn: 'data.multiple'
+                visibleOn: 'this.multiple',
+                precision: '${precision}'
               },
 
               getSchemaTpl('valueFormula', {
@@ -243,8 +244,9 @@ export class RangeControlPlugin extends BasePlugin {
                   type: 'input-number'
                 },
                 valueType: 'number', // 期望数值类型
-                visibleOn: '!data.multiple',
-                pipeIn: defaultValue(0)
+                visibleOn: '!this.multiple',
+                pipeIn: defaultValue(0),
+                precision: '${precision}'
               }),
 
               getSchemaTpl('valueFormula', {
@@ -256,7 +258,8 @@ export class RangeControlPlugin extends BasePlugin {
                 pipeIn: defaultValue(0),
                 needDeleteProps: ['min'], // 避免自我限制
                 label: '最小值',
-                valueType: 'number'
+                valueType: 'number',
+                precision: '${precision}'
               }),
               getSchemaTpl('valueFormula', {
                 name: 'max',
@@ -267,16 +270,28 @@ export class RangeControlPlugin extends BasePlugin {
                 pipeIn: defaultValue(100),
                 needDeleteProps: ['max'], // 避免自我限制
                 label: '最大值',
-                valueType: 'number'
+                valueType: 'number',
+                precision: '${precision}'
               }),
               {
                 label: '步长',
                 name: 'step',
                 type: 'input-number',
                 value: 1,
+                precision: '${precision}',
                 pipeOut: (value?: number) => {
                   return value || 1;
                 }
+              },
+              {
+                type: 'input-number',
+                name: 'precision',
+                label: tipedLabel(
+                  '小数位数',
+                  '根据四舍五入精确保留设置的小数位数'
+                ),
+                min: 1,
+                max: 100
               },
 
               getSchemaTpl('unit'),
@@ -297,7 +312,7 @@ export class RangeControlPlugin extends BasePlugin {
               {
                 type: 'container',
                 className: 'ae-ExtendMore mb-2',
-                visibleOn: 'data.tooltipVisible === undefined',
+                visibleOn: 'this.tooltipVisible === undefined',
                 body: [
                   {
                     type: 'select',
@@ -325,7 +340,7 @@ export class RangeControlPlugin extends BasePlugin {
                 name: 'clearable',
                 label: '可重置',
                 value: false,
-                visibleOn: '!!data.showInput'
+                visibleOn: '!!this.showInput'
               }),
               getSchemaTpl('autoFillApi')
             ]

@@ -19,7 +19,8 @@ import {
   createObject,
   setVariable,
   ucFirst,
-  isEffectiveApi
+  isEffectiveApi,
+  getVariable
 } from 'amis-core';
 import {Icon, SpinnerExtraProps, Input, Spinner, OverflowTpl} from 'amis-ui';
 import {ActionSchema} from '../Action';
@@ -270,7 +271,9 @@ export default class TextControl extends React.PureComponent<
   ) {
     const actionType = action?.actionType as string;
 
-    if (!!~['clear', 'reset'].indexOf(actionType)) {
+    if (actionType === 'reset') {
+      this.resetValue();
+    } else if (actionType === 'clear') {
       this.clearValue();
     } else if (actionType === 'focus') {
       this.focus();
@@ -298,6 +301,34 @@ export default class TextControl extends React.PureComponent<
     }
   }
 
+  async resetValue() {
+    const {onChange, dispatchEvent, resetValue, formStore, store, name} =
+      this.props;
+    const pristineVal =
+      getVariable(formStore?.pristine ?? store?.pristine, name) ?? resetValue;
+
+    const changeEvent = await dispatchEvent(
+      'change',
+      resolveEventData(this.props, {value: pristineVal})
+    );
+
+    if (changeEvent?.prevented) {
+      return;
+    }
+
+    onChange(pristineVal);
+
+    this.setState(
+      {
+        inputValue: pristineVal
+      },
+      () => {
+        this.focus();
+        this.loadAutoComplete();
+      }
+    );
+  }
+
   async clearValue() {
     const {onChange, dispatchEvent, clearValueOnEmpty} = this.props;
     let resetValue = this.props.resetValue;
@@ -317,7 +348,7 @@ export default class TextControl extends React.PureComponent<
 
     const changeEvent = await dispatchEvent(
       'change',
-      resolveEventData(this.props, {resetValue})
+      resolveEventData(this.props, {value: resetValue})
     );
 
     if (changeEvent?.prevented) {
@@ -1180,7 +1211,7 @@ export default class TextControl extends React.PureComponent<
         });
 
     return (
-      <div className={classNames}>
+      <div className={classNames} style={style}>
         {addOn && addOn.position === 'left' ? addOnDom : null}
         {body}
         {addOn && addOn.position !== 'left' ? addOnDom : null}
@@ -1220,11 +1251,11 @@ export default class TextControl extends React.PureComponent<
               {
                 key: 'inputControlClassName',
                 weights: {
-                  active: {
-                    pre: `${ns}TextControl.is-focused > .inputControlClassName-${id?.replace(
-                      'u:',
-                      ''
-                    )}, `
+                  focused: {
+                    parent: `.${ns}TextControl.is-focused`
+                  },
+                  disabled: {
+                    parent: `.${ns}TextControl.is-disabled`
                   }
                 }
               }
@@ -1247,11 +1278,12 @@ export default class TextControl extends React.PureComponent<
                   hover: {
                     inner: 'input'
                   },
-                  active: {
-                    pre: `${ns}TextControl.is-focused > .inputControlClassName-${id?.replace(
-                      'u:',
-                      ''
-                    )}, `,
+                  focused: {
+                    parent: `.${ns}TextControl.is-focused`,
+                    inner: 'input'
+                  },
+                  disabled: {
+                    parent: `.${ns}TextControl.is-disabled`,
                     inner: 'input'
                   }
                 }

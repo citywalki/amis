@@ -32,6 +32,7 @@ import {
   resolveVariableAndFilter,
   parsePrimitiveQueryString
 } from 'amis-core';
+import pickBy from 'lodash/pickBy';
 import {Html, SpinnerExtraProps} from 'amis-ui';
 import {
   BaseSchema,
@@ -512,7 +513,7 @@ export default class CRUD2 extends React.Component<CRUD2Props, any> {
    * 发起一次新的查询，查询条件不同，需要从第一页数据加载
    */
   handleSearch(data: {
-    query?: object; // 查询条件，没有将使用当前的
+    query?: Record<string, any>; // 查询条件，没有将使用当前的
     resetQuery?: boolean;
     replaceQuery?: boolean;
     loadMore?: boolean;
@@ -530,10 +531,12 @@ export default class CRUD2 extends React.Component<CRUD2Props, any> {
     const parseQueryOptions = this.getParseQueryOptions(this.props);
     let {query, resetQuery, replaceQuery, loadMore, resetPage} = data || {};
 
-    query =
-      syncLocation && query
-        ? qsparse(qsstringify(query, undefined, true))
-        : query || {};
+    /** 找出clearValueOnHidden的字段, 保证updateQuery时不会使用上次的保留值 */
+    query = {
+      ...query,
+      ...pickBy(query?.__super?.diff ?? {}, value => value === undefined)
+    };
+    query = syncLocation ? qsparse(qsstringify(query, undefined, true)) : query;
 
     /** 把布尔值反解出来 */
     if (parsePrimitiveQuery) {
@@ -1056,14 +1059,35 @@ export default class CRUD2 extends React.Component<CRUD2Props, any> {
       // @ts-ignore
       return this[`handle${upperFirst(action.actionType)}`](data);
     }
-    // const {onAction, data: ctx} = this.props;
-    // return this.props.onAction?.(
-    //   undefined,
-    //   action,
-    //   ctx,
-    //   throwErrors,
-    //   undefined
-    // );
+  }
+
+  @autobind
+  handleAction(
+    e: React.UIEvent<any> | undefined,
+    action: ActionObject,
+    ctx: object,
+    throwErrors: boolean = false,
+    delegate?: IScopedContext
+  ) {
+    if (
+      [
+        'stopAutoRefresh',
+        'reload',
+        'search',
+        'startAutoRefresh',
+        'loadMore'
+      ].includes(action.actionType as any)
+    ) {
+      return this.doAction(action, ctx, throwErrors);
+    } else {
+      return this.props.onAction(
+        e,
+        action,
+        ctx,
+        throwErrors,
+        delegate || this.context
+      );
+    }
   }
 
   unSelectItem(item: any, index: number) {
@@ -1313,6 +1337,8 @@ export default class CRUD2 extends React.Component<CRUD2Props, any> {
       columnsTogglable,
       headerToolbarClassName,
       footerToolbarClassName,
+      id,
+      testIdBuilder,
       ...rest
     } = this.props;
 
@@ -1322,8 +1348,13 @@ export default class CRUD2 extends React.Component<CRUD2Props, any> {
           'is-loading': store.loading
         })}
         style={style}
+        data-id={id}
+        {...testIdBuilder?.getTestId()}
       >
-        <div className={cx('Crud2-filter')}>
+        <div
+          className={cx('Crud2-filter')}
+          {...testIdBuilder?.getChild('filter').getTestId()}
+        >
           {this.renderFilter(filterSchema)}
         </div>
 
@@ -1348,7 +1379,8 @@ export default class CRUD2 extends React.Component<CRUD2Props, any> {
             type: mode,
             columns: mode.startsWith('table')
               ? store.columns || columns
-              : undefined
+              : undefined,
+            id
           },
           {
             key: 'body',
@@ -1370,6 +1402,7 @@ export default class CRUD2 extends React.Component<CRUD2Props, any> {
             maxKeepItemSelectionLength,
             // valueField: valueField || primaryField,
             primaryField: primaryField,
+            testIdBuilder,
             items: store.data.items,
             query: store.query,
             orderBy: store.query.orderBy,
@@ -1380,6 +1413,7 @@ export default class CRUD2 extends React.Component<CRUD2Props, any> {
             onSearch: this.handleQuerySearch,
             onSort: this.handleQuerySearch,
             onSelect: this.handleSelect,
+            onAction: this.handleAction,
             data: store.mergedData,
             loading: store.loading,
             host: this

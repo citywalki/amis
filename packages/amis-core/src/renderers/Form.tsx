@@ -49,10 +49,15 @@ import LazyComponent from '../components/LazyComponent';
 import {isAlive} from 'mobx-state-tree';
 
 import type {LabelAlign} from './Item';
-import {injectObjectChain} from '../utils';
+import {
+  CustomStyleClassName,
+  injectObjectChain,
+  setThemeClassName
+} from '../utils';
 import {reaction} from 'mobx';
 import groupBy from 'lodash/groupBy';
 import isEqual from 'lodash/isEqual';
+import CustomStyle from '../components/CustomStyle';
 
 export interface FormHorizontal {
   left?: number;
@@ -232,7 +237,7 @@ export interface FormSchemaBase {
   /**
    * 配置表单项默认的展示方式。
    */
-  mode?: 'normal' | 'inline' | 'horizontal';
+  mode?: 'normal' | 'inline' | 'horizontal' | 'flex';
 
   /**
    * 表单项显示为几列
@@ -502,7 +507,8 @@ export default class Form extends React.Component<FormProps, object> {
     this.beforePageUnload = this.beforePageUnload.bind(this);
     this.formItemDispatchEvent = this.formItemDispatchEvent.bind(this);
 
-    const {store, canAccessSuperData, persistData, simpleMode} = props;
+    const {store, canAccessSuperData, persistData, simpleMode, formLazyChange} =
+      props;
 
     store.setCanAccessSuperData(canAccessSuperData !== false);
     store.setPersistData(persistData);
@@ -533,7 +539,10 @@ export default class Form extends React.Component<FormProps, object> {
         () => store.initedAt,
         () => {
           store.inited &&
-            this.lazyEmitChange(!!this.props.submitOnChange, true);
+            (formLazyChange === false ? this.emitChange : this.lazyEmitChange)(
+              !!this.props.submitOnChange,
+              true
+            );
         }
       )
     );
@@ -713,7 +722,7 @@ export default class Form extends React.Component<FormProps, object> {
   async dispatchInited(value: any) {
     const {data, store, dispatchEvent} = this.props;
 
-    if (store.fetching) {
+    if (!isAlive(store) || store.fetching) {
       return value;
     }
 
@@ -993,7 +1002,10 @@ export default class Form extends React.Component<FormProps, object> {
 
       this.flushing = true;
       const hooks = this.hooks['flush'] || [];
-      await Promise.all(hooks.map(fn => fn()));
+      // 得有顺序，有些可能依赖上一个的结果
+      for (let hook of hooks) {
+        await hook();
+      }
       if (!this.emitting) {
         await this.lazyEmitChange.flush();
       }
@@ -1051,7 +1063,7 @@ export default class Form extends React.Component<FormProps, object> {
       return;
     }
     store.changeValue(name, value, changePristine);
-    if (!changePristine) {
+    if (!changePristine || typeof value !== 'undefined') {
       (formLazyChange === false ? this.emitChange : this.lazyEmitChange)(
         submit
       );
@@ -1072,13 +1084,14 @@ export default class Form extends React.Component<FormProps, object> {
     try {
       this.emitting = true;
 
-      const {onChange, store, submitOnChange, dispatchEvent, data} = this.props;
+      const {onChange, store, submitOnChange, dispatchEvent, data, originData} =
+        this.props;
 
       if (!isAlive(store)) {
         return;
       }
 
-      const diff = difference(store.data, store.pristine);
+      const diff = difference(store.data, originData ?? store.upStreamData);
       if (
         emitedFromWatch &&
         (!Object.keys(diff).length || isEqual(store.data, this.emittedData))
@@ -1735,6 +1748,7 @@ export default class Form extends React.Component<FormProps, object> {
     otherProps: Partial<FormProps> = {}
   ): React.ReactNode {
     children = children || [];
+    const {classnames: cx} = this.props;
 
     if (!Array.isArray(children)) {
       children = [children];
@@ -1765,8 +1779,6 @@ export default class Form extends React.Component<FormProps, object> {
         return null;
       }
 
-      const {classnames: cx} = this.props;
-
       return (
         <div className={cx('Form-row')}>
           {children.map((control, key) =>
@@ -1789,6 +1801,63 @@ export default class Form extends React.Component<FormProps, object> {
       );
     }
 
+    if (this.props.mode === 'flex') {
+      let rows: any = [];
+      children.forEach(child => {
+        if (typeof child.row === 'number') {
+          if (rows[child.row]) {
+            rows[child.row].push(child);
+          } else {
+            rows[child.row] = [child];
+          }
+        } else {
+          // 没有 row 的，就单启一行
+          rows.push([child]);
+        }
+      });
+      return (
+        <>
+          {rows.map((children: any, index: number) => {
+            return (
+              <div className={cx('Form-flex')} role="flex-row" key={index}>
+                {children.map((control: any, key: number) => {
+                  const split = control.colSize?.split('/');
+                  const colSize =
+                    split?.[0] && split?.[1]
+                      ? (split[0] / split[1]) * 100 + '%'
+                      : control.colSize;
+                  return ~['hidden', 'formula'].indexOf(
+                    (control as any).type
+                  ) ? (
+                    this.renderChild(control, key, otherProps)
+                  ) : (
+                    <div
+                      key={control.id || key}
+                      className={cx(
+                        `Form-flex-col`,
+                        (control as Schema).columnClassName
+                      )}
+                      style={{
+                        flex:
+                          colSize && !['1', 'auto'].includes(colSize)
+                            ? `0 0 ${colSize}`
+                            : ''
+                      }}
+                      role="flex-col"
+                    >
+                      {this.renderChild(control, '', {
+                        ...otherProps,
+                        mode: 'flex'
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </>
+      );
+    }
     return children.map((control, key) =>
       this.renderChild(control, key, otherProps, region)
     );
@@ -1841,7 +1910,10 @@ export default class Form extends React.Component<FormProps, object> {
       formSubmited: form.submited,
       formMode: mode,
       formHorizontal: horizontal,
-      formLabelAlign: labelAlign !== 'left' ? 'right' : labelAlign,
+      formLabelAlign:
+        !labelAlign || !['left', 'right', 'top'].includes(labelAlign)
+          ? 'right'
+          : labelAlign,
       formLabelWidth: labelWidth,
       controlWidth,
       /**
@@ -1898,6 +1970,11 @@ export default class Form extends React.Component<FormProps, object> {
       staticClassName,
       static: isStatic = false,
       loadingConfig,
+      themeCss,
+      id,
+      wrapperCustomStyle,
+      env,
+      wrapWithPanel,
       testid
     } = this.props;
 
@@ -1926,7 +2003,25 @@ export default class Form extends React.Component<FormProps, object> {
           `Form--${mode || 'normal'}`,
           columnCount ? `Form--column Form--column-${columnCount}` : null,
           staticClassName && isStatic ? staticClassName : className,
-          isStatic ? 'Form--isStatic' : null
+          isStatic ? 'Form--isStatic' : null,
+          setThemeClassName({
+            ...this.props,
+            name: [
+              'formControlClassName',
+              'itemClassName',
+              'staticClassName',
+              'itemLabelClassName'
+            ],
+            id,
+            themeCss
+          }),
+          !wrapWithPanel &&
+            setThemeClassName({
+              ...this.props,
+              name: 'wrapperCustomStyle',
+              id,
+              themeCss: wrapperCustomStyle
+            })
         )}
         onSubmit={this.handleFormSubmit}
         noValidate
@@ -2000,6 +2095,74 @@ export default class Form extends React.Component<FormProps, object> {
             show: store.drawerOpen
           }
         )}
+        <CustomStyle
+          {...this.props}
+          config={{
+            themeCss,
+            classNames: [
+              wrapWithPanel && {
+                key: 'panelClassName'
+              },
+              !wrapWithPanel && {
+                key: 'formControlClassName'
+              },
+              {
+                key: 'headerControlClassName',
+                weights: {
+                  default: {
+                    parent: `.${cx('Panel')}`
+                  }
+                }
+              },
+              wrapWithPanel && {
+                key: 'headerTitleControlClassName',
+                weights: {
+                  default: {
+                    important: true
+                  }
+                }
+              },
+              wrapWithPanel && {
+                key: 'bodyControlClassName'
+              },
+              wrapWithPanel && {
+                key: 'actionsControlClassName',
+                weights: {
+                  default: {
+                    parent: `.${cx('Panel--form')}`
+                  }
+                }
+              },
+              {
+                key: 'itemClassName',
+                weights: {
+                  default: {
+                    inner: `.${cx('Form-item')}`
+                  }
+                }
+              },
+              {
+                key: 'staticClassName',
+                weights: {
+                  default: {
+                    inner: `.${cx('Form-static')}`
+                  }
+                }
+              },
+              {
+                key: 'itemLabelClassName',
+                weights: {
+                  default: {
+                    inner: `.${cx('Form-label')}`
+                  }
+                }
+              }
+            ].filter(n => n) as CustomStyleClassName[],
+            wrapperCustomStyle,
+            id
+          }}
+          env={env}
+        />
       </WrapperComponent>
     );
   }
@@ -2023,7 +2186,10 @@ export default class Form extends React.Component<FormProps, object> {
       affixFooter,
       lazyLoad,
       translate: __,
-      footer
+      footer,
+      id,
+      wrapperCustomStyle,
+      themeCss
     } = this.props;
 
     let body: JSX.Element = this.renderBody();
@@ -2036,7 +2202,22 @@ export default class Form extends React.Component<FormProps, object> {
           title: __(title)
         },
         {
-          className: cx(panelClassName, 'Panel--form'),
+          className: cx(
+            panelClassName,
+            'Panel--form',
+            setThemeClassName({
+              ...this.props,
+              name: 'wrapperCustomStyle',
+              id,
+              themeCss: wrapperCustomStyle
+            }),
+            setThemeClassName({
+              ...this.props,
+              name: 'panelClassName',
+              id,
+              themeCss
+            })
+          ),
           style: style,
           formStore: this.props.store,
           children: body,
@@ -2046,11 +2227,35 @@ export default class Form extends React.Component<FormProps, object> {
           disabled: store.loading,
           btnDisabled: store.loading || store.validating,
           headerClassName,
+          headerControlClassName: setThemeClassName({
+            ...this.props,
+            name: 'headerControlClassName',
+            id,
+            themeCss
+          }),
+          headerTitleControlClassName: setThemeClassName({
+            ...this.props,
+            name: 'headerTitleControlClassName',
+            id,
+            themeCss
+          }),
           footer,
           footerClassName,
           footerWrapClassName,
           actionsClassName,
+          actionsControlClassName: setThemeClassName({
+            ...this.props,
+            name: 'actionsControlClassName',
+            id,
+            themeCss
+          }),
           bodyClassName,
+          bodyControlClassName: setThemeClassName({
+            ...this.props,
+            name: 'bodyControlClassName',
+            id,
+            themeCss
+          }),
           affixFooter
         }
       ) as JSX.Element;

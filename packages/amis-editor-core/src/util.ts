@@ -4,7 +4,12 @@
 import {hasIcon, mapObject, utils} from 'amis';
 import type {PlainObject, Schema, SchemaNode} from 'amis';
 import {getGlobalData} from 'amis-theme-editor-helper';
-import {isExpression, resolveVariableAndFilter} from 'amis-core';
+import {
+  mapTree,
+  isExpression,
+  resolveVariableAndFilter,
+  filterTree
+} from 'amis-core';
 import type {VariableItem} from 'amis-ui';
 import {isObservable, reaction} from 'mobx';
 import DeepDiff, {Diff} from 'deep-diff';
@@ -16,6 +21,8 @@ import isNumber from 'lodash/isNumber';
 import debounce from 'lodash/debounce';
 import merge from 'lodash/merge';
 import {EditorModalBody} from './store/editor';
+import {filter} from 'lodash';
+import type {SchemaType} from 'amis/lib/Schema';
 
 const {
   guid,
@@ -48,6 +55,7 @@ export {
 
 export let themeConfig: any = {};
 export let themeOptionsData: any = {};
+export let cssVars: any = {};
 
 export function __uri(id: string) {
   return id;
@@ -314,6 +322,21 @@ export function JSONGetById(json: any, id: string, idKey?: string): any {
   }
 
   return JSONGetByPath(json, paths);
+}
+
+export function JSONGetNodesById(
+  json: any,
+  id: string,
+  idKey: string = '$$id'
+): Array<any> {
+  let result: Array<any> = [];
+
+  JSONTraverse(json, (value: any, key: string, host: any) => {
+    if (key === idKey && value == id) {
+      result.push(host);
+    }
+  });
+  return result;
 }
 
 export function JSONGetParentById(
@@ -680,7 +703,10 @@ export function createElementFromHTML(htmlString: string): HTMLElement {
 }
 
 export function deepFind(schema: any, keyValue: any, result: any = {}): any {
-  if (schema?.$$commonSchema === keyValue) {
+  if (
+    schema?.$$commonSchema === keyValue ||
+    schema?.$$formSchema === keyValue
+  ) {
     result[keyValue] = schema;
   } else if (isPlainObject(schema)) {
     Object.keys(schema).forEach(key => {
@@ -709,7 +735,7 @@ export function filterSchemaForConfig(schema: any, valueWithConfig?: any): any {
       const value = schema[key];
       const filtered = filterSchemaForConfig(value, valueWithConfig);
 
-      if (schema.$$commonSchema) {
+      if (schema.$$commonSchema || schema.$$formSchema) {
         mapped[key] && (mapped[key] = filtered);
       } else {
         mapped[key] = filtered;
@@ -721,6 +747,17 @@ export function filterSchemaForConfig(schema: any, valueWithConfig?: any): any {
       if (key === '$$commonSchema' && !valueWithConfig) {
         schema = mapped = {$$commonSchema: value};
       } else if (key === '$$commonSchema' && valueWithConfig) {
+        let config: any = deepFind(valueWithConfig, value);
+        config[value] &&
+          (schema = mapped =
+            {
+              ...config[value]
+            });
+      }
+
+      if (key === '$$formSchema' && !valueWithConfig) {
+        schema = mapped = {$$formSchema: value};
+      } else if (key === '$$formSchema' && valueWithConfig) {
         let config: any = deepFind(valueWithConfig, value);
         config[value] &&
           (schema = mapped =
@@ -1159,11 +1196,52 @@ export function setThemeConfig(config: any) {
   themeConfig = config;
   themeOptionsData = getGlobalData(themeConfig);
   themeUselessPropKeys = Object.keys(getThemeConfig());
+  cssVars = getAllCssVar();
+}
+
+/**
+ * 获取组件的css变量
+ * @param id 组件id
+ * @param selectorText 选择器
+ * @returns css变量
+ */
+export function getCssVarById(id: string, selectorText: string) {
+  const styleSheets = document.styleSheets;
+  let cssVars: PlainObject = {};
+  for (const styleSheet of styleSheets) {
+    if ((styleSheet.ownerNode as Element)?.id === id) {
+      for (let i = 0; i < styleSheet.cssRules.length; i++) {
+        const cssRule = styleSheet.cssRules[i] as any;
+        if ((cssRule as any).selectorText?.includes(selectorText)) {
+          const cssText = cssRule.style.cssText;
+          const cssArr = cssText.split('; ');
+          cssArr.forEach((item: string) => {
+            if (item) {
+              const [key, value] = item.split(': ');
+              cssVars[key] = value;
+            }
+          });
+        }
+      }
+      break;
+    }
+  }
+  return cssVars;
+}
+
+export function getAllCssVar() {
+  const cssVars = getCssVarById('baseStyle', ':root, .AMISCSSWrapper');
+  const themeCssVars = getCssVarById(
+    'themeCss',
+    '.app-popover, #editor-preview-body'
+  );
+
+  return Object.assign({}, cssVars, themeCssVars);
 }
 
 // 获取主题数据和样式选择器数据
 export function getThemeConfig() {
-  return {themeConfig, ...themeOptionsData};
+  return {themeConfig, ...themeOptionsData, cssVars};
 }
 
 const backgroundMap: PlainObject = {
@@ -1326,13 +1404,14 @@ export async function getVariables(that: any) {
   let variablesArr: any[] = [];
 
   const {variables, requiredDataPropsVariables} = that.props;
+  const selfName = that.props?.data?.name;
   if (!variables || requiredDataPropsVariables) {
     // 从amis数据域中取变量数据
     const {node, manager} = that.props.formProps || that.props;
     let vars = await resolveVariablesFromScope(node, manager);
     if (Array.isArray(vars)) {
       if (!that.isUnmount) {
-        variablesArr = vars;
+        variablesArr = filterVariablesOfScope(vars, selfName);
       }
     }
   }
@@ -1361,6 +1440,170 @@ export async function getVariables(that: any) {
   return variablesArr;
 }
 
+function filterVariablesOfScope(options: any[], selfName?: string) {
+  const idx = options.findIndex(i => i.label === '组件上下文');
+  const arr = options[idx]?.children || [];
+  const restOptions = options.filter((_, i) => i !== idx);
+  const variables = mapTree(arr, (item: any) => {
+    // 子表过滤成员那层
+    if (item.type === 'array' && Array.isArray(item.children)) {
+      if (item.children.length === 1) {
+        const child = item.children[0];
+        if (child.type === 'object' && child.disabled) {
+          return {
+            ...item,
+            children: child.children
+          };
+        }
+      }
+    }
+    return item;
+  });
+  const finalVars = filterTree(variables, item => {
+    // 如果是子表 过滤掉当前自己 因为已经在当前层出现了
+    if (item.rawType && item.type === 'array' && item.children) {
+      const idx = item.children.findIndex(
+        (i: any) => i.value === `${item.value}.${selfName}`
+      );
+      return !~idx;
+    }
+    return true;
+  });
+  return [...finalVars, ...restOptions];
+}
+
+export async function getQuickVariables(that: any, filter?: Function) {
+  const {node, manager} = that.props.formProps || that.props;
+  const {quickVars, data} = that.props;
+  const selfName = data?.name;
+  await manager?.getContextSchemas(node);
+  const options = await manager?.dataSchema?.getDataPropsAsOptions();
+  if (Array.isArray(options)) {
+    const curOptions = mapTree(filterVariablesOfScope(options), item => {
+      delete item.tag;
+      return item;
+    });
+    return resolveQuickVariables(curOptions, quickVars, selfName, filter);
+  }
+
+  return [];
+}
+
+export async function getConditionVariables(that: any, filter?: Function) {
+  const {node, manager} = that.props.formProps || that.props;
+  const selfName = that.props?.data?.name;
+  await manager?.getContextSchemas(node);
+  const isCell = node.type === 'cell';
+  const options = await manager?.dataSchema?.getDataPropsAsOptions();
+  if (Array.isArray(options)) {
+    const finalVars = [];
+    const [curOption, superOption] = filterVariablesOfScope(options);
+    // 如果当前选中是子表列，则过滤掉当前层
+    const variables = (!isCell ? curOption.children || [] : []).filter(
+      (item: any) =>
+        item.value !== selfName &&
+        item.type &&
+        item.rawType &&
+        item.type !== 'array'
+    );
+    finalVars.push(...variables);
+    if (superOption?.children?.length) {
+      const superVars = superOption?.children.filter(
+        (item: any) => item.type && item.rawType && item.type !== 'array'
+      );
+      finalVars.push(...superVars);
+    }
+
+    return finalVars;
+  }
+  return [];
+}
+
+export function resolveQuickVariables(
+  options: any,
+  quickVars?: VariableItem[],
+  selfName?: string,
+  filter?: Function
+) {
+  if (!Array.isArray(options)) {
+    return [];
+  }
+  const finalVars = [];
+  const curOption = options[0];
+  const superOption = options[1];
+  const variables = (curOption.children || [])
+    .filter(
+      (item: any) =>
+        item.value !== selfName && item.rawType && item.rawType !== 'boolean'
+    )
+    .map((item: any) => {
+      // 子表过滤成员那层
+      if (item.type === 'array' && Array.isArray(item.children)) {
+        if (item.children.length === 1) {
+          const child = item.children[0];
+          if (child.type === 'object' && child.disabled) {
+            return {
+              ...item,
+              children: child.children
+            };
+          }
+        }
+      }
+      return item;
+    });
+  if (superOption?.children?.length) {
+    const superVars = superOption?.children.filter(
+      (item: any) =>
+        item.rawType && item.rawType !== 'boolean' && item.type !== 'array'
+    );
+    finalVars.push(...superVars);
+    finalVars.push({
+      label: curOption.label,
+      children: variables
+    });
+  } else {
+    finalVars.push(...variables);
+  }
+
+  const filterVar = filter ? filter(finalVars) : finalVars;
+
+  function sortVars(arr: any[]) {
+    const arrs = [...arr];
+    arrs.sort((obj1, obj2) => {
+      if ('children' in obj1 && !('children' in obj2)) {
+        return 1;
+      } else if (!('children' in obj1) && 'children' in obj2) {
+        return -1;
+      } else {
+        return 0;
+      }
+    });
+    return arrs;
+  }
+
+  if (quickVars?.length) {
+    const vars: VariableItem[] = [];
+
+    if (!filterVar.length) {
+      vars.push(...quickVars);
+    } else {
+      vars.push({
+        label: '快捷变量',
+        type: 'quickVars',
+        children: quickVars
+      });
+    }
+
+    if (filterVar.length) {
+      vars.push(...filterVar);
+    }
+
+    return sortVars(vars);
+  }
+
+  return sortVars(filterVar);
+}
+
 /**
  * 更新组件上下文中label为带层级说明
  * @param variables 变量列表
@@ -1377,7 +1620,8 @@ export const updateComponentContext = (variables: any[]) => {
         label:
           index === 0
             ? `当前层${child.label ? '(' + child.label + ')' : ''}`
-            : `上${index}层${child.label ? '(' + child.label + ')' : ''}`
+            : child.title ||
+              `上${index}层${child.label ? '(' + child.label + ')' : ''}`
       }))
     });
   }
@@ -1578,3 +1822,102 @@ export function mergeDefinitions(
 
   return schema;
 }
+
+export function setDefaultColSize(
+  regionList: any[],
+  row: number,
+  preRow?: number
+) {
+  const tempList = [...regionList];
+  const preRowNodeLength = filter(tempList, n => n.row === preRow).length;
+  const currentRowNodeLength = filter(tempList, n => n.row === row).length;
+  for (let i = 0; i < tempList.length; i++) {
+    const item = tempList[i];
+    if (item.row === preRow) {
+      item.colSize = preRowNodeLength > 1 ? `1/${preRowNodeLength}` : '1';
+    }
+    if (item.row === row) {
+      item.colSize =
+        currentRowNodeLength > 1 ? `1/${currentRowNodeLength}` : '1';
+    }
+    // 原来的行只有一个节点，且有默认宽度，则设置默认宽度
+    if (
+      ((preRowNodeLength === 1 && item.row === preRow) ||
+        (currentRowNodeLength === 1 && item.row === row)) &&
+      item.$$defaultColSize
+    ) {
+      item.colSize = item.$$defaultColSize;
+    }
+  }
+  return tempList;
+}
+
+export const RAW_TYPE_MAP: {
+  [k in SchemaType | 'user-select' | 'department-select']?:
+    | 'string'
+    | 'number'
+    | 'array'
+    | 'boolean'
+    | 'object'
+    | 'enum'
+    | 'date'
+    | 'datetime'
+    | 'time'
+    | 'quarter'
+    | 'year'
+    | 'month'
+    | 'user'
+    | 'department';
+} = {
+  'input-text': 'string',
+  'input-password': 'string',
+  'input-email': 'string',
+  'input-url': 'string',
+  'input-rich-text': 'string',
+  'textarea': 'string',
+  'input-formula': 'string',
+  'input-image': 'string',
+  'input-repeat': 'string',
+  'location-picker': 'string',
+
+  'input-number': 'number',
+  'input-range': 'number',
+  'input-rating': 'number',
+
+  'radio': 'boolean',
+  'switch': 'boolean',
+
+  'select': 'enum',
+  'multi-select': 'enum',
+  'tree-select': 'enum',
+  'nested-select': 'enum',
+  'list-select': 'enum',
+  'input-tree': 'enum',
+  'input-tag': 'enum',
+  'tabs-transfer': 'enum',
+  'transfer': 'enum',
+  'transfer-picker': 'enum',
+  'tabs-transfer-picker': 'enum',
+  'radios': 'enum',
+
+  'input-date': 'date',
+  'input-date-range': 'date',
+
+  'input-time': 'time',
+  'input-time-range': 'time',
+
+  'input-month': 'month',
+  'input-month-range': 'month',
+
+  'input-datetime': 'datetime',
+  'input-quarter': 'quarter',
+  'input-year': 'year',
+  'input-datetime-range': 'datetime',
+
+  'input-quarter-range': 'quarter',
+
+  'input-table': 'array',
+
+  'user-select': 'user',
+  'department-select': 'department'
+};

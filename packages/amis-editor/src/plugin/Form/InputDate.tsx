@@ -253,7 +253,7 @@ export class DateControlPlugin extends BasePlugin {
     {
       actionType: 'reset',
       actionLabel: '重置',
-      description: '将值重置为resetValue，若没有配置resetValue，则清空'
+      description: '将值重置为初始值'
     },
     {
       actionType: 'setValue',
@@ -392,7 +392,14 @@ export class DateControlPlugin extends BasePlugin {
             },
             getSchemaTpl('status', {isFormItem: true}),
             getSchemaTpl('validation', {
-              tag: ValidatorTag.Date
+              tag: ValidatorTag.Date,
+              rendererSchema: (schema: Schema) => {
+                return {
+                  ...schema,
+                  label: '值内容',
+                  validateName: 'equals'
+                };
+              }
             })
           ],
           {...context?.schema, configTitle: 'props'}

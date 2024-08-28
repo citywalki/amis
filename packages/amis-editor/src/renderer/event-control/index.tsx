@@ -220,13 +220,13 @@ export class EventControl extends React.Component<
       const pluginEvents =
         typeof tmpEvents === 'function' ? tmpEvents(data) : [...tmpEvents];
 
-      pluginEvents.forEach((event: RendererPluginEvent) => {
-        eventPanelActive[event.eventName] = true;
-      });
+      // 事件配置面板不自动折叠
+      // pluginEvents.forEach((event: RendererPluginEvent) => {
+      //   eventPanelActive[event.eventName] = true;
+      // });
 
       this.setState({
-        events: pluginEvents,
-        eventPanelActive
+        events: pluginEvents
       });
     }
   }
@@ -422,10 +422,10 @@ export class EventControl extends React.Component<
     }
 
     onEventConfig[event] = {
+      ...onEventConfig[event],
       actions: onEventConfig[event].actions.filter(
         (item, actionIndex) => index !== actionIndex
-      ),
-      weight: onEvent[event].weight
+      )
     };
 
     if (onEventConfig[event].actions.length < 1) {
@@ -1261,10 +1261,7 @@ export class EventControl extends React.Component<
                                       }
                                     )}
                                   >
-                                    <Icon
-                                      className="icon"
-                                      icon="edit-full-btn"
-                                    />
+                                    <Icon className="icon" icon="setting" />
                                   </div>
                                   <div
                                     onClick={this.delAction.bind(

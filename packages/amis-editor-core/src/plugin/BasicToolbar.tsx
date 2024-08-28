@@ -122,7 +122,8 @@ export class BasicToolbarPlugin extends BasePlugin {
 
       if (
         !host?.memberImmutable(regionNode.region) &&
-        store.panels.some(Panel => Panel.key === 'renderers')
+        store.panels.some(Panel => Panel.key === 'renderers') &&
+        store.toolbarMode === 'default'
       ) {
         const nextId = parent[idx + 1]?.$$id;
 
@@ -206,36 +207,37 @@ export class BasicToolbarPlugin extends BasePlugin {
         onClick: this.manager.del.bind(this.manager, id)
       });
     }
+    if (store.toolbarMode === 'default') {
+      toolbars.push({
+        id: 'more',
+        iconSvg: 'more-btn',
+        icon: 'fa fa-cog',
+        tooltip: '更多',
+        placement: 'bottom',
+        order: 1000,
+        onClick: e => {
+          if (!e.defaultPrevented) {
+            const info = (
+              e.target as HTMLElement
+            ).parentElement!.getBoundingClientRect();
 
-    toolbars.push({
-      id: 'more',
-      iconSvg: 'more-btn',
-      icon: 'fa fa-cog',
-      tooltip: '更多',
-      placement: 'bottom',
-      order: 1000,
-      onClick: e => {
-        if (!e.defaultPrevented) {
-          const info = (
-            e.target as HTMLElement
-          ).parentElement!.getBoundingClientRect();
+            // 150 是 contextMenu 的宽度
+            // 默认右对齐
+            let x = window.scrollX + info.left + info.width - 150;
 
-          // 150 是 contextMenu 的宽度
-          // 默认右对齐
-          let x = window.scrollX + info.left + info.width - 150;
+            // 显示不全是改成左对齐
+            if (x < 0) {
+              x = window.scrollX + info.left;
+            }
 
-          // 显示不全是改成左对齐
-          if (x < 0) {
-            x = window.scrollX + info.left;
+            this.manager.openContextMenu(id, '', {
+              x: x,
+              y: window.scrollY + info.top + info.height + 8
+            });
           }
-
-          this.manager.openContextMenu(id, '', {
-            x: x,
-            y: window.scrollY + info.top + info.height + 8
-          });
         }
-      }
-    });
+      });
+    }
 
     if (info.scaffoldForm?.canRebuild ?? info.plugin.scaffoldForm?.canRebuild) {
       toolbars.push({
@@ -263,19 +265,25 @@ export class BasicToolbarPlugin extends BasePlugin {
 
     if (selections.length) {
       // 多选时的右键菜单
-      menus.push({
-        id: 'copy',
-        label: '重复一份',
-        icon: 'copy-icon',
-        disabled: selections.some(item => !item.node.duplicatable),
-        onSelect: () => manager.duplicate(selections.map(item => item.id))
-      });
+      if (store.toolbarMode === 'default') {
+        menus.push({
+          id: 'copy',
+          label: '重复一份',
+          icon: 'copy-icon',
+          disabled: selections.some(item => !item.node.duplicatable),
+          onSelect: () => manager.duplicate(selections.map(item => item.id))
+        });
+      }
 
       menus.push({
         id: 'unselect',
         label: '取消多选',
         icon: 'cancel-icon',
-        onSelect: () => store.setActiveId(id)
+        onSelect: () =>
+          store.setActiveId(
+            id,
+            region || node.childRegions.find(i => i.region)?.region
+          )
       });
 
       menus.push({
@@ -320,6 +328,9 @@ export class BasicToolbarPlugin extends BasePlugin {
         });
       }
     } else {
+      if (store.toolbarMode === 'mini') {
+        return;
+      }
       menus.push({
         id: 'select',
         label: `选中${first.label}`,
@@ -583,7 +594,7 @@ export class BasicToolbarPlugin extends BasePlugin {
       menus.push({
         id: 'build',
         label: `快速构建「${info.plugin.name}」`,
-        disabled: schema.$$commonSchema,
+        disabled: schema.$$commonSchema || schema.$$formSchema,
         onSelect: () =>
           this.manager.reScaffold(
             id,

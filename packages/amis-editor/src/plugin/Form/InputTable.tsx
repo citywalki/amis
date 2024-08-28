@@ -15,7 +15,8 @@ import {
   repeatArray,
   mockValue,
   EditorNodeType,
-  EditorManager
+  EditorManager,
+  RAW_TYPE_MAP
 } from 'amis-editor-core';
 import {setVariable, someTree} from 'amis-core';
 import {DSBuilderManager} from '../../builder/DSBuilderManager';
@@ -29,6 +30,7 @@ import {
   resolveArrayDatasource,
   resolveInputTableEventDataSchame
 } from '../../util';
+import type {SchemaType} from 'amis';
 
 export class TableControlPlugin extends BasePlugin {
   static id = 'TableControlPlugin';
@@ -1074,13 +1076,13 @@ export class TableControlPlugin extends BasePlugin {
             label: '删除范围',
             size: 'lg',
             placeholder: '请输入行号，输入多个则用英文逗号分隔',
-            hiddenOn: 'data.__deleteType !== "rowIndex"'
+            hiddenOn: 'this.__deleteType !== "rowIndex"'
           },
           getSchemaTpl('formulaControl', {
             name: 'condition',
             variables: '${variables}',
             label: '删除条件',
-            hiddenOn: 'data.__deleteType !== "conditionExpression"',
+            hiddenOn: 'this.__deleteType !== "conditionExpression"',
             mode: 'horizontal',
             required: true,
             horizontal: {
@@ -1094,7 +1096,7 @@ export class TableControlPlugin extends BasePlugin {
     // {
     //   actionType: 'reset',
     //   actionLabel: '重置',
-    //   description: '将值重置为resetValue，若没有配置resetValue，则清空'
+    //   description: '将值重置为初始值'
     // },
     {
       actionType: 'clear',
@@ -1411,29 +1413,18 @@ export class TableControlPlugin extends BasePlugin {
     ]);
   };
 
-  filterProps(props: any) {
-    const arr = resolveArrayDatasource(props);
+  filterProps(props: any, node: EditorNodeType) {
+    if (!node.state.value) {
+      const arr = resolveArrayDatasource(props);
+      let value: Array<any> = [];
 
-    /** 可 */
-    if (!Array.isArray(arr) || !arr.length) {
-      const mockedData: any = {};
-
-      if (Array.isArray(props.columns)) {
-        props.columns.forEach((column: any) => {
-          /** 可编辑状态下不写入 Mock 数据，避免误导用户 */
-          if (column.name && !props.editable) {
-            setVariable(mockedData, column.name, mockValue(column));
-          }
-        });
-      }
-
-      props.value = repeatArray(mockedData, 1).map((item, index) => ({
-        ...item,
-        id: index + 1
-      }));
-    } else {
       // 只取10条预览，否则太多卡顿
-      props.value = arr.slice(0, 10);
+      if (Array.isArray(arr) && arr.length) {
+        value = arr.slice(0, 10);
+      } else {
+        value.push({});
+      }
+      node.updateState({value});
     }
 
     return {
@@ -1538,6 +1529,7 @@ export class TableControlPlugin extends BasePlugin {
     return {
       $id: `${node.id}-${node.type}-tableData`,
       type: 'array',
+      rawType: RAW_TYPE_MAP[node.schema.type as SchemaType] || 'string',
       title: node.schema?.label || node.schema?.name,
       items: itemsSchema
     };

@@ -8,7 +8,8 @@ import {
   loadScript,
   buildStyle,
   CustomStyle,
-  setThemeClassName
+  setThemeClassName,
+  str2function
 } from 'amis-core';
 import {ServiceStore, IServiceStore} from 'amis-core';
 
@@ -54,7 +55,7 @@ const DEFAULT_EVENT_PARAMS = [
 
 /**
  * Chart 图表渲染器。
- * 文档：https://aisuda.bce.baidu.com/amis/zh-CN/components/carousel
+ * 文档：https://aisuda.bce.baidu.com/amis/zh-CN/components/chart
  */
 export interface ChartSchema extends BaseSchema {
   /**
@@ -427,7 +428,7 @@ export class Chart extends React.Component<ChartProps> {
         this.echarts = (echarts as any).init(ref, theme);
 
         if (typeof onChartMount === 'string') {
-          onChartMount = new Function('chart', 'echarts') as any;
+          onChartMount = str2function(onChartMount, 'chart', 'echarts') as any;
         }
 
         onChartMount?.(this.echarts, echarts);

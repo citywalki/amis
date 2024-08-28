@@ -13,10 +13,12 @@ import {EditorDNDManager} from './dnd';
 import React from 'react';
 import {DiffChange} from './util';
 import find from 'lodash/find';
+import {RAW_TYPE_MAP} from './util';
 import type {RendererConfig, Schema} from 'amis-core';
 import type {MenuDivider, MenuItem} from 'amis-ui/lib/components/ContextMenu';
 import type {BaseSchema, SchemaCollection} from 'amis';
 import type {AsyncLayerOptions} from './component/AsyncLayer';
+import type {SchemaType} from 'packages/amis/src/Schema';
 
 /**
  * 区域的定义，容器渲染器都需要定义区域信息。
@@ -114,7 +116,9 @@ export interface RegionConfig {
     | 'default'
     | 'position-h'
     | 'position-v'
-    | (new (dnd: EditorDNDManager) => DNDModeInterface);
+    | 'flex'
+    // | (new (dnd: EditorDNDManager) => DNDModeInterface)
+    | ((node: any) => string | undefined);
 
   /**
    * 可以用来判断是否允许拖入当前节点。
@@ -212,6 +216,11 @@ export interface RendererInfo extends RendererScaffoldInfo {
    * 配置区域。
    */
   regions?: Array<RegionConfig>;
+
+  /**
+   *  选中不需要高亮
+   */
+  notHighlight?: boolean;
 
   /**
    * 哪些容器属性需要自动转成数组的。如果不配置默认就从 regions 里面读取。
@@ -534,6 +543,7 @@ export interface InsertEventContext extends BaseEventContext {
     id: string;
     type: string;
     data: any;
+    position?: string;
   };
 }
 
@@ -819,6 +829,11 @@ export interface PluginInterface
    * panelBodyAsyncCreator设置后异步加载层的配置项
    */
   async?: AsyncLayerOptions;
+
+  /**
+   * 拖拽模式
+   */
+  dragMode?: string;
 
   /**
    * 有数据域的容器，可以为子组件提供读取的字段绑定页面
@@ -1256,6 +1271,7 @@ export abstract class BasePlugin implements PluginInterface {
   ) {
     return {
       type: 'string',
+      rawType: RAW_TYPE_MAP[node.schema.type as SchemaType] || 'string',
       title:
         typeof node.schema.label === 'string'
           ? node.schema.label

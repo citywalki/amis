@@ -8,7 +8,8 @@ import {
   BasePlugin,
   tipedLabel,
   JSONPipeOut,
-  undefinedPipeOut
+  undefinedPipeOut,
+  RAW_TYPE_MAP
 } from 'amis-editor-core';
 
 import {ValidatorTag} from '../../validator';
@@ -20,7 +21,7 @@ import {
   resolveOptionType
 } from '../../util';
 
-import type {Schema} from 'amis';
+import type {Schema, SchemaType} from 'amis';
 import type {
   EditorNodeType,
   RendererPluginAction,
@@ -28,6 +29,7 @@ import type {
   BaseEventContext,
   EditorManager
 } from 'amis-editor-core';
+import {inputStateTpl} from '../../renderer/style-control/helper';
 
 export class SelectControlPlugin extends BasePlugin {
   static id = 'SelectControlPlugin';
@@ -176,7 +178,7 @@ export class SelectControlPlugin extends BasePlugin {
     {
       actionType: 'reset',
       actionLabel: '重置',
-      description: '将值重置为resetValue，若没有配置resetValue，则清空'
+      description: '将值重置为初始值'
     },
     {
       actionType: 'reload',
@@ -301,7 +303,28 @@ export class SelectControlPlugin extends BasePlugin {
         title: '外观',
         body: [
           getSchemaTpl('collapseGroup', [
-            getSchemaTpl('style:formItem', {renderer: context.info.renderer}),
+            getSchemaTpl('theme:formItem'),
+            getSchemaTpl('theme:form-label'),
+            getSchemaTpl('theme:form-description'),
+            {
+              title: '选择框样式',
+              body: [
+                ...inputStateTpl('themeCss.selectControlClassName', '--select')
+              ]
+            },
+            {
+              title: '下拉框样式',
+              body: [
+                ...inputStateTpl(
+                  'themeCss.selectPopoverClassName',
+                  '--select',
+                  {
+                    state: ['default', 'hover', 'focused']
+                  }
+                )
+              ]
+            },
+            getSchemaTpl('theme:cssCode'),
             getSchemaTpl('style:classNames')
           ])
         ]
@@ -325,6 +348,7 @@ export class SelectControlPlugin extends BasePlugin {
     let dataSchema: any = {
       type,
       title: node.schema?.label || node.schema?.name,
+      rawType: RAW_TYPE_MAP[node.schema.type as SchemaType] || 'string',
       originalValue: node.schema?.value // 记录原始值，循环引用检测需要
     };
 

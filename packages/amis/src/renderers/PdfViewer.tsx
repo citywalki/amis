@@ -74,9 +74,15 @@ export default class PdfViewer extends React.Component<
   componentDidUpdate(prevProps: PdfViewerProps) {
     const props = this.props;
 
-    if (isApiOutdated(prevProps.src, props.src, prevProps.data, props.data)) {
+    if (
+      isApiOutdated(prevProps.src, props.src, prevProps.data, props.data) ||
+      resolveVariableAndFilter(props.src, props.data, '| raw') !==
+        resolveVariableAndFilter(prevProps.src, prevProps.data, '| raw')
+    ) {
       this.abortLoad();
-      this.fetchPdf();
+      setTimeout(() => {
+        this.fetchPdf();
+      }, 0);
     }
 
     if (getVariable(props.data, props.name)) {
@@ -123,9 +129,19 @@ export default class PdfViewer extends React.Component<
   @autobind
   async fetchPdf() {
     const {env, src, data, translate: __} = this.props;
-    const finalSrc = src
-      ? resolveVariableAndFilter(src, data, '| raw')
-      : undefined;
+    let finalSrc;
+
+    if (src) {
+      const resolveSrc = resolveVariableAndFilter(src, data, '| raw');
+      if (typeof resolveSrc === 'string') {
+        finalSrc = resolveSrc;
+      } else if (
+        typeof resolveSrc === 'object' &&
+        typeof resolveSrc.value === 'string'
+      ) {
+        finalSrc = resolveSrc.value;
+      }
+    }
 
     if (!finalSrc) {
       console.warn('file src is empty');
@@ -134,7 +150,8 @@ export default class PdfViewer extends React.Component<
 
     this.setState({
       inited: true,
-      loading: true
+      loading: true,
+      error: false
     });
 
     try {
@@ -221,34 +238,52 @@ export default class PdfViewer extends React.Component<
     return null;
   }
 
+  @autobind
+  renderTip() {
+    return (
+      <div>
+        <p>
+          [PdfViewer]: pdfjsWorkerSrc is required, Please set the
+          `pdfjsWorkerSrc` in env.
+        </p>
+      </div>
+    );
+  }
+
   render() {
     const {
       className,
       classnames: cx,
       translate: __,
       height,
-      background,
-      src
+      background
     } = this.props;
+    const pdfjs = this.props.env.pdfjsWorkerSrc;
     const {loading, inited, error} = this.state;
     const width = Math.max(this.props.width || this.state.width, 300);
 
     return (
       <div ref={this.wrapper}>
         {this.renderEmpty()}
-        <Suspense fallback={<div>...</div>}>
-          {inited && !error ? (
-            <PdfView
-              file={this.file}
-              loading={loading}
-              className={className}
-              classnames={cx}
-              width={width}
-              height={height}
-              background={background}
-            />
-          ) : null}
-        </Suspense>
+        {!pdfjs ? (
+          this.renderTip()
+        ) : (
+          <Suspense fallback={<div>...</div>}>
+            {inited && !error ? (
+              <PdfView
+                pdfjsWorkerSrc={pdfjs}
+                file={this.file}
+                loading={loading}
+                className={className}
+                classnames={cx}
+                width={width}
+                height={height}
+                background={background}
+              />
+            ) : null}
+          </Suspense>
+        )}
+
         {this.renderError()}
       </div>
     );

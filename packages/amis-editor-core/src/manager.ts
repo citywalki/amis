@@ -9,7 +9,7 @@ import debounce from 'lodash/debounce';
 import findIndex from 'lodash/findIndex';
 import omit from 'lodash/omit';
 import {openContextMenus, toast, alert, DataScope, DataSchema} from 'amis';
-import {getRenderers, RenderOptions, mapTree, isEmpty} from 'amis-core';
+import {getRenderers, RenderOptions, JSONTraverse} from 'amis-core';
 import {
   PluginInterface,
   BasicPanelItem,
@@ -56,7 +56,9 @@ import {
   isLayoutPlugin,
   JSONPipeOut,
   scrollToActive,
-  JSONPipeIn
+  JSONPipeIn,
+  generateNodeId,
+  JSONGetNodesById
 } from './util';
 import {hackIn, makeSchemaFormRender, makeWrapper} from './component/factory';
 import {env} from './env';
@@ -961,10 +963,6 @@ export class EditorManager {
       // 当前节点是布局类容器节点
       regionNodeId = curActiveId;
       regionNodeRegion = 'items';
-    } else if (node.schema.fields && node.schema.type === 'doc-entity') {
-      // 当前节点是表单视图
-      regionNodeId = curActiveId;
-      regionNodeRegion = 'fields';
     } else if (node.schema.body) {
       // 当前节点是容器节点
       regionNodeId = curActiveId;
@@ -1027,11 +1025,7 @@ export class EditorManager {
       value,
       nextId,
       subRenderer || node.info,
-      {
-        id: store.dragId,
-        type: store.dragType,
-        data: store.dragSchema
-      },
+      undefined, // 不是拖拽，不需要传递拖拽信息
       reGenerateId
     );
     if (child && activeChild) {
@@ -1451,12 +1445,13 @@ export class EditorManager {
       sourceId: node.id,
       direction: 'up',
       beforeId: node.prevSibling?.id,
-      region: regionNode.region
+      region: regionNode.region,
+      regionNode: regionNode
     };
 
     const event = this.trigger('before-move', context);
     if (!event.prevented) {
-      store.moveUp(node.id);
+      store.moveUp(context);
       // this.buildToolbars();
       this.trigger('after-move', context);
       this.trigger('after-update', context);
@@ -1482,12 +1477,13 @@ export class EditorManager {
       sourceId: node.id,
       direction: 'down',
       beforeId: node.nextSibling?.nextSibling?.id,
-      region: regionNode.region
+      region: regionNode.region,
+      regionNode: regionNode
     };
 
     const event = this.trigger('before-move', context);
     if (!event.prevented) {
-      store.moveDown(node.id);
+      store.moveDown(context);
       // this.buildToolbars();
       this.trigger('after-move', context);
       this.trigger('after-update', context);
@@ -1512,8 +1508,7 @@ export class EditorManager {
     if (!event.prevented) {
       Array.isArray(context.data) && context.data.length
         ? this.store.delMulti(context.data)
-        : this.store.del(id);
-
+        : this.store.del(context);
       this.trigger('after-delete', context);
     }
   }
@@ -1571,6 +1566,59 @@ export class EditorManager {
   }
 
   /**
+   * 重新生成当前节点的重复的id
+   */
+  reGenerateNodeDuplicateID(types: Array<string> = []) {
+    const node = this.store.getNodeById(this.store.activeId);
+    if (!node) {
+      return;
+    }
+    let schema = node.schema;
+    let changed = false;
+
+    // 支持按照类型过滤某类型组件
+    let tags = node.info?.plugin?.tags || [];
+    if (!Array.isArray(tags)) {
+      tags = [tags];
+    }
+    if (types.length && !tags.some(tag => types.includes(tag))) {
+      return;
+    }
+
+    // 记录组件新旧ID映射关系方便当前组件内事件动作替换
+    let idRefs: {[propKey: string]: string} = {};
+
+    // 如果有多个重复组件，则重新生成ID
+    JSONTraverse(schema, (value: any, key: string, host: any) => {
+      const isNodeIdFormat =
+        typeof value === 'string' && value.indexOf('u:') === 0;
+      if (key === 'id' && isNodeIdFormat && host) {
+        let sameNodes = JSONGetNodesById(this.store.schema, value, 'id');
+        if (sameNodes && sameNodes.length > 1) {
+          let newId = generateNodeId();
+          idRefs[value] = newId;
+          host[key] = newId;
+          changed = true;
+        }
+      }
+      return value;
+    });
+
+    if (changed) {
+      // 替换当前组件内事件动作里面可能的ID
+      JSONTraverse(schema, (value: any, key: string, host: any) => {
+        const isNodeIdFormat =
+          typeof value === 'string' && value.indexOf('u:') === 0;
+        if (key === 'componentId' && isNodeIdFormat && idRefs[value]) {
+          host.componentId = idRefs[value];
+        }
+        return value;
+      });
+      this.replaceChild(node.id, schema);
+    }
+  }
+
+  /**
    * 清空区域
    * @param id
    * @param region
@@ -1606,6 +1654,7 @@ export class EditorManager {
       id: string;
       type: string;
       data: any;
+      position?: string;
     },
     reGenerateId?: boolean
   ): any | null {
@@ -1654,7 +1703,8 @@ export class EditorManager {
     id: string,
     region: string,
     sourceId: string,
-    beforeId?: string
+    beforeId?: string,
+    dragInfo?: any
   ): boolean {
     const store = this.store;
 
@@ -1662,7 +1712,8 @@ export class EditorManager {
       ...this.buildEventContext(id),
       beforeId,
       region: region,
-      sourceId
+      sourceId,
+      dragInfo
     };
 
     const event = this.trigger('before-move', context);

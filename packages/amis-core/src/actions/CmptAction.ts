@@ -85,7 +85,7 @@ export class CmptAction implements RendererAction {
       return component?.reload?.(
         undefined,
         action.data,
-        undefined,
+        event.data,
         undefined,
         dataMergeMode === 'override',
         action.args
@@ -99,7 +99,9 @@ export class CmptAction implements RendererAction {
     ) {
       const {dispatchEvent, data} = component?.props || {};
       try {
-        const valid = await component?.props.onValidate?.();
+        const valid =
+          (await component?.props.onValidate?.()) ||
+          (await component?.validate?.());
         if (valid) {
           event.setData(
             createObject(event.data, {

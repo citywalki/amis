@@ -60,8 +60,17 @@ export default class Head extends React.PureComponent<Props> {
   tdColumns: Array<TdProps>;
 
   prependColumns(columns: Array<any>) {
-    const {rowSelectionFixed, expandableFixed, draggable} = this.props;
-    if (draggable) {
+    const {
+      rowSelectionFixed,
+      expandableFixed,
+      draggable,
+      selectable,
+      expandable
+    } = this.props;
+    if (expandable) {
+      columns.unshift({});
+    }
+    if (draggable || selectable) {
       columns.unshift({});
     } else {
       if (expandableFixed) {
@@ -124,7 +133,8 @@ export default class Head extends React.PureComponent<Props> {
       onSelectAll,
       onFilter,
       onResizeMouseDown,
-      testIdBuilder
+      testIdBuilder,
+      className
     } = this.props;
 
     const {thColumns, tdColumns} = getBuildColumns(columns);
@@ -133,7 +143,7 @@ export default class Head extends React.PureComponent<Props> {
 
     // 获取一行最多th个数
     let maxCount = 0;
-    columns.forEach(cols => {
+    this.thColumns.forEach(cols => {
       if (cols.length > maxCount) {
         maxCount = cols.length;
       }
@@ -165,9 +175,9 @@ export default class Head extends React.PureComponent<Props> {
     const selectedKeys = selectedRowKeys.filter((key: number | string) =>
       rowKeys.includes(key)
     );
-
+    let thIndex = 0;
     return (
-      <thead ref={this.domRef} className={cx('Table-thead')}>
+      <thead ref={this.domRef} className={cx('Table-thead', className)}>
         {this.thColumns.map((data, index) => {
           return (
             <tr key={'th-cell-' + index}>
@@ -230,6 +240,7 @@ export default class Head extends React.PureComponent<Props> {
               ) : null}
               {isLeftExpandable && index === 0 ? expandableCell : null}
               {data.map((item: any, colIndex: number) => {
+                thIndex++;
                 let sort = null;
                 if (item.sorter) {
                   sort = (
@@ -306,9 +317,7 @@ export default class Head extends React.PureComponent<Props> {
                     classPrefix={classPrefix}
                     fixed={item.fixed === true ? 'left' : item.fixed}
                     className={cx({
-                      'Table-cell-last':
-                        colIndex === maxCount - 1 &&
-                        colIndex === data.length - 1
+                      'Table-cell-last': thIndex === maxCount
                     })}
                     depth={item.depth}
                     col={String(colIndex)}

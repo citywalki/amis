@@ -27,7 +27,10 @@ import {
   OptionsControlProps,
   RootClose,
   ActionObject,
-  renderTextByKeyword
+  renderTextByKeyword,
+  getVariable,
+  TestIdBuilder,
+  labelToString
 } from 'amis-core';
 import {findDOMNode} from 'react-dom';
 import xor from 'lodash/xor';
@@ -102,6 +105,7 @@ export interface NestedSelectProps
   mobileUI?: boolean;
   maxTagCount?: number;
   overflowTagPopover?: TooltipObject;
+  testIdBuilder?: TestIdBuilder;
 }
 
 export interface NestedSelectState {
@@ -151,13 +155,15 @@ export default class NestedSelectControl extends React.Component<
   }
 
   doAction(action: ActionObject, data: object, throwErrors: boolean) {
-    const {resetValue, onChange} = this.props;
+    const {resetValue, onChange, formStore, store, name} = this.props;
     const actionType = action?.actionType as string;
 
     if (actionType === 'clear') {
       onChange?.('');
     } else if (actionType === 'reset') {
-      onChange?.(resetValue ?? '');
+      const pristineVal =
+        getVariable(formStore?.pristine ?? store?.pristine, name) ?? resetValue;
+      onChange?.(pristineVal ?? '');
     }
   }
 
@@ -245,15 +251,17 @@ export default class NestedSelectControl extends React.Component<
     const regexp = string2regExp(inputValue);
 
     if (hideNodePathLabel) {
-      return option[labelField || 'label'];
+      return labelToString(option[labelField || 'label']);
     }
     const ancestors = getTreeAncestors(options, option, true);
 
-    const optionText = option[labelField || 'label'];
+    const optionText = labelToString(option[labelField || 'label']);
     const splitJoin = ' / ';
 
     const title = ancestors
-      ? ancestors.map(item => item[labelField || 'label']).join(splitJoin)
+      ? ancestors
+          .map(item => labelToString(item[labelField || 'label']))
+          .join(splitJoin)
       : optionText;
 
     return (
@@ -264,7 +272,7 @@ export default class NestedSelectControl extends React.Component<
       >
         {ancestors
           ? ancestors.map((item, index) => {
-              const label = item[labelField || 'label'];
+              const label = labelToString(item[labelField || 'label']);
               const value = item[valueField || 'value'];
               const isEnd = index === ancestors.length - 1;
               return (
@@ -315,7 +323,11 @@ export default class NestedSelectControl extends React.Component<
   }
 
   @autobind
-  async handleCheck(option: Option | Options, index?: number) {
+  async handleCheck(
+    option: Option | Options,
+    index?: number,
+    resetOptionStack?: boolean
+  ) {
     const {
       onChange,
       selectedOptions,
@@ -431,7 +443,7 @@ export default class NestedSelectControl extends React.Component<
     isPrevented || onChange(newValue);
     isPrevented || this.handleResultClear();
     /** 选项选择后需要重置下拉数据源：搜索结果 => 原始数据 */
-    this.setState({stack: [this.props.options]});
+    resetOptionStack && this.setState({stack: [this.props.options]});
   }
 
   allChecked(options: Options): boolean {
@@ -641,7 +653,8 @@ export default class NestedSelectControl extends React.Component<
       labelField,
       menuClassName,
       cascade,
-      onlyChildren
+      onlyChildren,
+      testIdBuilder
     } = this.props;
     const valueField = this.props.valueField || 'value';
     const stack = this.state.stack;
@@ -671,6 +684,9 @@ export default class NestedSelectControl extends React.Component<
             ) : null}
 
             {options.map((option: Option, idx: number) => {
+              const itemTIB = testIdBuilder
+                ?.getChild(`menu-${index}`)
+                .getChild(option.value || idx);
               const ancestors = getTreeAncestors(propOptions, option as any);
               const parentChecked = ancestors?.some(
                 item => !!~selectedOptions.indexOf(item)
@@ -696,7 +712,7 @@ export default class NestedSelectControl extends React.Component<
                 selfChecked = true;
               }
 
-              let label = option[labelField || 'label'];
+              let label = labelToString(option[labelField || 'label']);
 
               return (
                 <div
@@ -711,11 +727,17 @@ export default class NestedSelectControl extends React.Component<
                   {multiple ? (
                     <Checkbox
                       size="sm"
-                      onChange={this.handleCheck.bind(this, option, index)}
+                      onChange={this.handleCheck.bind(
+                        this,
+                        option,
+                        index,
+                        false
+                      )}
                       trueValue={option[valueField]}
                       checked={selfChecked || (!cascade && selfChildrenChecked)}
                       partial={!selfChecked}
                       disabled={nodeDisabled}
+                      testIdBuilder={itemTIB?.getChild('checkbox')}
                     ></Checkbox>
                   ) : null}
 
@@ -730,6 +752,7 @@ export default class NestedSelectControl extends React.Component<
                         : this.handleOptionClick(option))
                     }
                     title={label}
+                    {...itemTIB?.getTestId()}
                   >
                     {label}
                   </div>
@@ -739,6 +762,7 @@ export default class NestedSelectControl extends React.Component<
                       className={cx('NestedSelect-optionArrowRight', {
                         'is-disabled': nodeDisabled
                       })}
+                      {...itemTIB?.getChild('arrow-right').getTestId()}
                     >
                       <Icon icon="right-arrow-bold" className="icon" />
                     </div>
@@ -832,7 +856,7 @@ export default class NestedSelectControl extends React.Component<
                   onClick={() => {
                     !isNodeDisabled &&
                       (multiple
-                        ? this.handleCheck(option, option.value)
+                        ? this.handleCheck(option, option.value, true)
                         : this.handleOptionClick(option));
                   }}
                 >
@@ -939,6 +963,7 @@ export default class NestedSelectControl extends React.Component<
       mobileUI,
       popOverContainer,
       env,
+      testIdBuilder,
       loadingConfig,
       maxTagCount,
       overflowTagPopover
@@ -986,6 +1011,7 @@ export default class NestedSelectControl extends React.Component<
           clearable={clearable}
           hasDropDownArrow={true}
           allowInput={searchable && !mobileUI}
+          testIdBuilder={testIdBuilder}
         >
           {loading ? (
             <Spinner loadingConfig={loadingConfig} size="sm" />

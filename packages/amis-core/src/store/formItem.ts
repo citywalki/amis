@@ -129,7 +129,10 @@ export const FormItemStore = StoreNode.named('FormItemStore')
       /** 总条数 */
       total: 0
     }),
-    accumulatedOptions: types.optional(types.frozen<Array<any>>(), [])
+    accumulatedOptions: types.optional(types.frozen<Array<any>>(), []),
+    popOverOpen: false,
+    popOverData: types.frozen(),
+    popOverSchema: types.frozen()
   })
   .views(self => {
     function getForm(): any {
@@ -266,9 +269,10 @@ export const FormItemStore = StoreNode.named('FormItemStore')
           }
 
           let unMatched = (valueArray && valueArray[index]) || item;
+          let hasValue = unMatched || unMatched === 0;
 
           if (
-            unMatched &&
+            hasValue &&
             (typeof unMatched === 'string' || typeof unMatched === 'number')
           ) {
             unMatched = {
@@ -276,7 +280,18 @@ export const FormItemStore = StoreNode.named('FormItemStore')
               [labelField || 'label']: item,
               __unmatched: true
             };
-          } else if (unMatched && extractValue) {
+
+            // 某些特殊情况，如select的autocomplete时
+            // 关键字没匹配到的项会被隐藏，不在filteredOptions中，导致匹配不到
+            // 此时需要从原始数据中查找，避免label丢失
+            const origin: any = self.selectedOptions
+              ? find(self.selectedOptions, optionValueCompare(item, valueField))
+              : null;
+
+            if (origin) {
+              unMatched[labelField] = origin[labelField];
+            }
+          } else if (hasValue && extractValue) {
             unMatched = {
               [valueField || 'value']: item,
               [labelField || 'label']: 'UnKnown',
@@ -284,7 +299,7 @@ export const FormItemStore = StoreNode.named('FormItemStore')
             };
           }
 
-          unMatched && selectedOptions.push(unMatched);
+          hasValue && selectedOptions.push(unMatched);
         });
 
         if (selectedOptions.length) {
@@ -843,7 +858,11 @@ export const FormItemStore = StoreNode.named('FormItemStore')
       } else if (clearValue && !self.selectFirst) {
         self.selectedOptions.some((item: any) => item.__unmatched) &&
           onChange &&
-          onChange('', false, true);
+          onChange(
+            self.joinValues === false && self.multiple ? [] : '',
+            false,
+            true
+          );
       }
 
       return json;
@@ -1349,9 +1368,10 @@ export const FormItemStore = StoreNode.named('FormItemStore')
           selectedOptions.push(flattened[idx]);
         } else {
           let unMatched = (value && value[index]) || item;
+          let hasValue = unMatched || unMatched === 0;
 
           if (
-            unMatched &&
+            hasValue &&
             (typeof unMatched === 'string' || typeof unMatched === 'number')
           ) {
             unMatched = {
@@ -1367,7 +1387,7 @@ export const FormItemStore = StoreNode.named('FormItemStore')
             if (orgin) {
               unMatched[labelField] = orgin[labelField];
             }
-          } else if (unMatched && self.extractValue) {
+          } else if (hasValue && self.extractValue) {
             unMatched = {
               [valueField]: item,
               [labelField]: 'UnKnown',
@@ -1375,7 +1395,7 @@ export const FormItemStore = StoreNode.named('FormItemStore')
             };
           }
 
-          unMatched && selectedOptions.push(unMatched);
+          hasValue && selectedOptions.push(unMatched);
         }
       });
 
@@ -1469,6 +1489,27 @@ export const FormItemStore = StoreNode.named('FormItemStore')
       }
     }
 
+    function openPopOver(
+      schema: any,
+      ctx: any,
+      callback?: (confirmed?: any, value?: any) => void
+    ) {
+      self.popOverData = ctx || {};
+      self.popOverOpen = true;
+      self.popOverSchema = schema;
+      callback && dialogCallbacks.set(self.popOverData, callback);
+    }
+
+    function closePopOver(confirmed?: any, result?: any) {
+      const callback = dialogCallbacks.get(self.popOverData);
+      self.popOverOpen = false;
+
+      if (callback) {
+        dialogCallbacks.delete(self.popOverData);
+        setTimeout(() => callback(confirmed, result), 200);
+      }
+    }
+
     function changeTmpValue(
       value: any,
       changeReason?:
@@ -1543,6 +1584,8 @@ export const FormItemStore = StoreNode.named('FormItemStore')
       resetValidationStatus,
       openDialog,
       closeDialog,
+      openPopOver,
+      closePopOver,
       changeTmpValue,
       changeEmitedValue,
       addSubFormItem,

@@ -95,6 +95,7 @@ import './renderers/Form/Group';
 import './renderers/Form/InputGroup';
 import './renderers/Form/UserSelect';
 import './renderers/Form/InputSignature';
+import './renderers/Form/InputVerificationCode';
 import './renderers/Grid';
 import './renderers/Grid2D';
 import './renderers/HBox';
@@ -174,6 +175,7 @@ import type {CRUD2Schema} from './renderers/CRUD2';
 import type {TabsSchema} from './renderers/Tabs';
 import {availableLanguages as EditorAvailableLanguages} from './renderers/Form/Editor';
 import type {Action} from './types';
+import type {SchemaType} from './Schema';
 export * from './renderers/Form/IconPickerIcons';
 export * from './renderers/Form/IconSelectStore';
 
@@ -192,5 +194,6 @@ export {
   TabsSchema,
   SchemaExpression,
   Action,
+  SchemaType,
   EditorAvailableLanguages
 };

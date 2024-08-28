@@ -2,13 +2,7 @@ import React from 'react';
 import isEqual from 'lodash/isEqual';
 import pickBy from 'lodash/pickBy';
 import omitBy from 'lodash/omitBy';
-import {
-  Renderer,
-  RendererProps,
-  evalExpressionWithConditionBuilder,
-  filterTarget,
-  mapTree
-} from 'amis-core';
+import {Renderer, RendererProps, filterTarget, mapTree} from 'amis-core';
 import {SchemaNode, Schema, ActionObject, PlainObject} from 'amis-core';
 import {CRUDStore, ICRUDStore, getMatchedEventTargets} from 'amis-core';
 import {
@@ -1441,9 +1435,13 @@ export default class CRUD extends React.Component<CRUDProps, any> {
     this.search(undefined, undefined, undefined);
 
     if (autoJumpToTopOnPagerChange && this.control) {
-      (findDOMNode(this.control) as HTMLElement).scrollIntoView();
-      const scrolledY = window.scrollY;
-      scrolledY && window.scroll(0, scrolledY);
+      if (this.control.scrollToTop) {
+        this.control.scrollToTop();
+      } else {
+        (findDOMNode(this.control) as HTMLElement).scrollIntoView();
+        const scrolledY = window.scrollY;
+        scrolledY && window.scroll(0, scrolledY);
+      }
     }
   }
 
@@ -2665,6 +2663,8 @@ export default class CRUD extends React.Component<CRUDProps, any> {
       headerToolbarRender,
       footerToolbarRender,
       testIdBuilder,
+      id,
+      filterCanAccessSuperData = true,
       ...rest
     } = this.props;
 
@@ -2675,6 +2675,7 @@ export default class CRUD extends React.Component<CRUDProps, any> {
           'is-mobile': isMobile()
         })}
         style={style}
+        data-id={id}
         {...testIdBuilder?.getChild('wrapper').getTestId()}
       >
         {filter && (!store.filterTogggable || store.filterVisible)
@@ -2700,7 +2701,7 @@ export default class CRUD extends React.Component<CRUDProps, any> {
                 onSubmit: this.handleFilterSubmit,
                 onInit: this.handleFilterInit,
                 formStore: undefined,
-                canAccessSuperData: false
+                canAccessSuperData: filterCanAccessSuperData
               }
             )
           : null}
@@ -2724,6 +2725,7 @@ export default class CRUD extends React.Component<CRUDProps, any> {
             className: cx('Crud-body', bodyClassName),
             ref: this.controlRef,
             autoGenerateFilter: !filter && autoGenerateFilter,
+            filterCanAccessSuperData,
             autoFillHeight: autoFillHeight,
             selectable: !!(
               (this.hasBulkActionsToolbar() && this.hasBulkActions()) ||
@@ -2763,7 +2765,8 @@ export default class CRUD extends React.Component<CRUDProps, any> {
             footerToolbarRender: this.renderFooterToolbar,
             data: store.mergedData,
             loading: store.loading,
-            host: this
+            host: this,
+            testIdBuilder: testIdBuilder?.getChild('body')
           }
         )}
         {render(
@@ -2819,7 +2822,7 @@ export class CRUDRenderer extends CRUD {
     if (args?.index || args?.condition) {
       // 局部刷新
       // 由内容组件去实现
-      return this.control?.reload('', query, ctx, args);
+      return this.control?.reload('', query, ctx, undefined, undefined, args);
     } else if (subpath) {
       return scoped.reload(
         query ? `${subpath}?${qsstringify(query)}` : subpath,
