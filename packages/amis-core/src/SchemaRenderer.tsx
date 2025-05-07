@@ -1,11 +1,14 @@
 import difference from 'lodash/difference';
+import findLastIndex from 'lodash/findLastIndex';
 import omit from 'lodash/omit';
 import React from 'react';
 import {isValidElementType} from 'react-is';
 import LazyComponent from './components/LazyComponent';
 import {
   filterSchema,
-  loadRenderer,
+  loadRendererError,
+  loadAsyncRenderer,
+  registerRenderer,
   RendererConfig,
   RendererEnv,
   RendererProps,
@@ -16,9 +19,20 @@ import {IScopedContext, ScopedContext} from './Scoped';
 import {Schema, SchemaNode} from './types';
 import {DebugWrapper} from './utils/debug';
 import getExprProperties from './utils/filter-schema';
-import {anyChanged, chainEvents, autobind, TestIdBuilder} from './utils/helper';
+import {
+  anyChanged,
+  chainEvents,
+  autobind,
+  TestIdBuilder,
+  formateId
+} from './utils/helper';
 import {SimpleMap} from './utils/SimpleMap';
-import {bindEvent, dispatchEvent, RendererEvent} from './utils/renderer-event';
+import {
+  bindEvent,
+  bindGlobalEventForRenderer as bindGlobalEvent,
+  dispatchEvent,
+  RendererEvent
+} from './utils/renderer-event';
 import {isAlive} from 'mobx-state-tree';
 import {reaction} from 'mobx';
 import {resolveVariableAndFilter} from './utils/tpl-builtin';
@@ -26,6 +40,12 @@ import {buildStyle} from './utils/style';
 import {isExpression} from './utils/formula';
 import {StatusScopedProps} from './StatusScoped';
 import {evalExpression, filter} from './utils/tpl';
+import Animations from './components/Animations';
+import {cloneObject} from './utils/object';
+import {observeGlobalVars} from './globalVar';
+import type {IRootStore} from './store/root';
+import {createObjectFromChain, extractObjectChain} from './utils';
+import {IIRendererStore} from './store/index';
 
 interface SchemaRendererProps
   extends Partial<Omit<RendererProps, 'statusStore'>>,
@@ -87,41 +107,59 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
   schema: any;
   path: string;
 
-  reaction: any;
+  tmpData: any;
+
+  toDispose: Array<() => any> = [];
   unbindEvent: (() => void) | undefined = undefined;
+  unbindGlobalEvent: (() => void) | undefined = undefined;
   isStatic: any = undefined;
+
+  subStore?: IIRendererStore | null;
 
   constructor(props: SchemaRendererProps) {
     super(props);
+
     this.refFn = this.refFn.bind(this);
     this.renderChild = this.renderChild.bind(this);
     this.reRender = this.reRender.bind(this);
     this.resolveRenderer(this.props);
     this.dispatchEvent = this.dispatchEvent.bind(this);
+    this.storeRef = this.storeRef.bind(this);
+    this.handleGlobalVarChange = this.handleGlobalVarChange.bind(this);
+
+    const schema = props.schema;
 
     // 监听statusStore更新
-    this.reaction = reaction(
-      () => {
-        const id = filter(props.schema.id, props.data);
-        const name = filter(props.schema.name, props.data);
-        return `${
-          props.statusStore.visibleState[id] ??
-          props.statusStore.visibleState[name]
-        }${
-          props.statusStore.disableState[id] ??
-          props.statusStore.disableState[name]
-        }${
-          props.statusStore.staticState[id] ??
-          props.statusStore.staticState[name]
-        }`;
-      },
-      () => this.forceUpdate()
+    this.toDispose.push(
+      reaction(
+        () => {
+          const id = filter(schema.id, props.data);
+          const name = filter(schema.name, props.data);
+          return `${
+            props.statusStore.visibleState[id] ??
+            props.statusStore.visibleState[name]
+          }${
+            props.statusStore.disableState[id] ??
+            props.statusStore.disableState[name]
+          }${
+            props.statusStore.staticState[id] ??
+            props.statusStore.staticState[name]
+          }`;
+        },
+        () => this.forceUpdate()
+      )
+    );
+
+    this.toDispose.push(
+      observeGlobalVars(schema, props.topStore, this.handleGlobalVarChange)
     );
   }
 
   componentWillUnmount() {
-    this.reaction?.();
+    this.toDispose.forEach(fn => fn());
+    this.toDispose = [];
     this.unbindEvent?.();
+    this.unbindGlobalEvent?.();
   }
 
   // 限制：只有 schema 除外的 props 变化，或者 schema 里面的某个成员值发生变化才更新。
@@ -150,6 +188,59 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
     }
 
     return false;
+  }
+
+  storeRef(store: IIRendererStore | null) {
+    this.subStore = store;
+  }
+
+  handleGlobalVarChange() {
+    const handler = this.renderer?.onGlobalVarChanged;
+    const topStore: IRootStore = this.props.topStore;
+    const chain = extractObjectChain(this.props.data).filter(
+      (item: any) => !item.hasOwnProperty('__isTempGlobalLayer')
+    );
+    const globalLayerIdx = findLastIndex(
+      chain,
+      item =>
+        item.hasOwnProperty('global') || item.hasOwnProperty('globalState')
+    );
+
+    const globalData = {
+      global: topStore.nextGlobalData.global,
+      globalState: topStore.nextGlobalData.globalState,
+      // 兼容旧的全局变量
+      __page: topStore.nextGlobalData.__page,
+      appVariables: topStore.nextGlobalData.appVariables,
+      __isTempGlobalLayer: true
+    };
+
+    if (globalLayerIdx !== -1) {
+      chain.splice(globalLayerIdx + 1, 0, globalData);
+    }
+    const newData = createObjectFromChain(chain);
+
+    // 如果渲染器自己做了实现，且返回 false，则不再继续往下执行
+    if (handler?.(this.cRef, this.props.schema, newData) === false) {
+      return;
+    }
+
+    // 强制刷新并通过一个临时对象让下发给组件的全局变量更新
+    // 等 react 完成一轮渲染后，将临时渲染切成正式渲染
+    // 也就是说删掉临时对象，后续渲染读取真正变更后的全局变量
+    //
+
+    // 为什么这么做？因为很多组件内部都会 diff  this.props.data 和 prevProps.data
+    // 如果对应的数据没有发生变化，则会跳过组件状态的更新
+    this.tmpData = newData;
+    this.subStore?.temporaryUpdateGlobalVars(globalData);
+    topStore.addSyncGlobalVarStatePendingTask(
+      callback => this.forceUpdate(callback),
+      () => {
+        delete this.tmpData;
+        this.subStore?.unDoTemporaryUpdateGlobalVars();
+      }
+    );
   }
 
   resolveRenderer(props: SchemaRendererProps, force = false): any {
@@ -236,21 +327,26 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
 
     if (ref) {
       // 这里无法区分监听的是不是广播，所以又bind一下，主要是为了绑广播
-      this.unbindEvent = bindEvent(this.ref);
+      this.unbindEvent?.();
+      this.unbindGlobalEvent?.();
+
+      this.unbindEvent = bindEvent(ref);
+      this.unbindGlobalEvent = bindGlobalEvent(ref);
     }
     this.cRef = ref;
   }
 
-  async dispatchEvent(
+  dispatchEvent(
     e: React.MouseEvent<any>,
     data: any,
-    renderer?: React.Component<RendererProps> // for didmount
+    renderer?: React.Component<RendererProps>, // for didmount
+    scoped?: IScopedContext
   ): Promise<RendererEvent<any> | void> {
-    return await dispatchEvent(
+    return this.props.dispatchEvent(
       e,
-      this.cRef || renderer,
-      this.context as IScopedContext,
-      data
+      data,
+      renderer || this.cRef,
+      scoped || (this.context as IScopedContext)
     );
   }
 
@@ -268,7 +364,7 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
     const omitList = RENDERER_TRANSMISSION_OMIT_PROPS.concat();
     if (this.renderer) {
       const Component = this.renderer.component;
-      Component.propsList &&
+      Component?.propsList &&
         omitList.push.apply(omitList, Component.propsList as Array<string>);
     }
 
@@ -284,7 +380,10 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
           ? evalExpression(_.staticOn, rest.data)
           : _.static ?? rest.defaultStatic),
       ...subProps,
-      data: subProps.data || rest.data,
+      data:
+        this.tmpData && subProps.data === this.props.data
+          ? this.tmpData
+          : subProps.data || rest.data,
       env: env
     });
   }
@@ -301,7 +400,6 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
       rootStore,
       statusStore,
       render,
-      key: propKey,
       ...rest
     } = this.props;
 
@@ -315,6 +413,9 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
     if (Array.isArray(schema)) {
       return render!($path, schema as any, rest) as JSX.Element;
     }
+
+    // 用于全局变量刷新
+    (rest as any).data = this.tmpData || rest.data;
 
     const detectData =
       schema &&
@@ -375,6 +476,7 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
         data: defaultData,
         value: defaultValue, // render时的value改放defaultValue中
         activeKey: defaultActiveKey,
+        key: propKey,
         ...restSchema
       } = schema;
       return rest.invisible
@@ -402,8 +504,7 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
     } else if (!this.renderer) {
       return rest.invisible ? null : (
         <LazyComponent
-          {...rest}
-          {...exprProps}
+          defaultVisible={true}
           getComponent={async () => {
             const result = await rest.env.loadRenderer(
               schema,
@@ -417,14 +518,20 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
             }
 
             this.reRender();
-            return () => loadRenderer(schema, $path);
+            return () => loadRendererError(schema, $path);
           }}
-          $path={$path}
-          $schema={schema}
-          retry={this.reRender}
-          rootStore={rootStore}
-          statusStore={statusStore}
-          dispatchEvent={this.dispatchEvent}
+        />
+      );
+    } else if (this.renderer.getComponent && !this.renderer.component) {
+      // 处理异步渲染器
+      return rest.invisible ? null : (
+        <LazyComponent
+          defaultVisible={true}
+          getComponent={async () => {
+            await loadAsyncRenderer(this.renderer as RendererConfig);
+            this.reRender();
+            return () => null;
+          }}
         />
       );
     }
@@ -435,9 +542,12 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
       data: defaultData,
       value: defaultValue,
       activeKey: defaultActiveKey,
+      key: propKey,
       ...restSchema
     } = schema;
-    const Component = renderer.component;
+    const Component = renderer.component!;
+
+    let animationShow = true;
 
     // 原来表单项的 visible: false 和 hidden: true 表单项的值和验证是有效的
     // 而 visibleOn 和 hiddenOn 是无效的，
@@ -450,7 +560,11 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
         !renderer.isFormItem ||
         (schema.visible !== false && !schema.hidden))
     ) {
-      return null;
+      if (schema.animations) {
+        animationShow = false;
+      } else {
+        return null;
+      }
     }
 
     // withStore 里面会处理，而且会实时处理
@@ -463,6 +577,7 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
       Component.prototype?.isReactComponent ||
       (Component as any).$$typeof === Symbol.for('react.forward_ref');
     let props: any = {
+      ...renderer.defaultProps?.(schema.type, schema),
       ...theme.getRendererConfig(renderer.name),
       ...restSchema,
       ...chainEvents(rest, restSchema),
@@ -517,11 +632,25 @@ export class SchemaRenderer extends React.Component<SchemaRendererProps, any> {
       }
     }
 
-    const component = supportRef ? (
-      <Component {...props} ref={this.childRef} />
+    let component = supportRef ? (
+      <Component {...props} ref={this.childRef} storeRef={this.storeRef} />
     ) : (
-      <Component {...props} forwardedRef={this.childRef} />
+      <Component
+        {...props}
+        forwardedRef={this.childRef}
+        storeRef={this.storeRef}
+      />
     );
+
+    if (schema.animations) {
+      component = (
+        <Animations
+          schema={schema}
+          component={component}
+          show={animationShow}
+        />
+      );
+    }
 
     return this.props.env.enableAMISDebug ? (
       <DebugWrapper renderer={renderer}>{component}</DebugWrapper>

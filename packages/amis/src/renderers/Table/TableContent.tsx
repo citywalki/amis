@@ -136,7 +136,9 @@ export function renderItemActions(
   );
 }
 
-export class TableContent extends React.PureComponent<TableContentProps> {
+export class TableContent<
+  T extends TableContentProps = TableContentProps
+> extends React.PureComponent<T> {
   render() {
     const {
       placeholder,
@@ -186,7 +188,11 @@ export class TableContent extends React.PureComponent<TableContentProps> {
     return (
       <div
         onMouseMove={onMouseMove}
-        className={cx('Table-content', className)}
+        className={cx(
+          'Table-content',
+          className,
+          store.rows.length > store.lazyRenderAfter ? 'use-virtual-list' : ''
+        )}
         onScroll={onScroll}
       >
         <table

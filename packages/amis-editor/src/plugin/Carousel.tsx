@@ -1,7 +1,13 @@
-import {registerEditorPlugin} from 'amis-editor-core';
-import {BaseEventContext, BasePlugin, BasicToolbarItem} from 'amis-editor-core';
-import {defaultValue, getSchemaTpl} from 'amis-editor-core';
-import {mockValue} from 'amis-editor-core';
+import {
+  registerEditorPlugin,
+  undefinedPipeOut,
+  BaseEventContext,
+  BasePlugin,
+  BasicToolbarItem,
+  defaultValue,
+  getSchemaTpl,
+  mockValue
+} from 'amis-editor-core';
 
 export class CarouselPlugin extends BasePlugin {
   static id = 'CarouselPlugin';
@@ -152,6 +158,42 @@ export class CarouselPlugin extends BasePlugin {
                     type: 'html',
                     content: '<p>html 片段</p>'
                   }
+                },
+
+                {
+                  label: '自定义容器',
+                  test: 'this.type === "container"',
+                  items: [
+                    {
+                      type: 'combo',
+                      name: 'content',
+                      label: false,
+                      multiple: false,
+                      items: [
+                        {
+                          type: 'input-text',
+                          name: 'itemSchema',
+                          value: {
+                            type: 'container',
+                            body: {
+                              type: 'tpl',
+                              tpl: '拖拽组件到这里'
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ],
+                  scaffold: {
+                    type: 'container',
+                    itemSchema: {
+                      type: 'container',
+                      body: {
+                        type: 'tpl',
+                        tpl: '拖拽组件到这里'
+                      }
+                    }
+                  }
                 }
               ],
               pipeIn: (value: any) => {
@@ -165,21 +207,32 @@ export class CarouselPlugin extends BasePlugin {
                         titleClassName?: string;
                         description?: string;
                         descriptionClassName?: string;
-                      }) =>
-                        item && item.hasOwnProperty('html')
-                          ? {
-                              type: 'html',
-                              content: item.html
+                        itemSchema?: any;
+                      }) => {
+                        if (item && item.hasOwnProperty('html')) {
+                          return {
+                            type: 'html',
+                            content: item.html
+                          };
+                        } else if (item && item.hasOwnProperty('itemSchema')) {
+                          return {
+                            type: 'container',
+                            content: {
+                              itemSchema: item.itemSchema
                             }
-                          : {
-                              type: 'image',
-                              content: item.image,
-                              title: item.title,
-                              href: item.href,
-                              titleClassName: item.titleClassName,
-                              description: item.description,
-                              descriptionClassName: item.descriptionClassName
-                            }
+                          };
+                        } else {
+                          return {
+                            type: 'image',
+                            content: item.image,
+                            title: item.title,
+                            href: item.href,
+                            titleClassName: item.titleClassName,
+                            description: item.description,
+                            descriptionClassName: item.descriptionClassName
+                          };
+                        }
+                      }
                     )
                   : [];
               },
@@ -188,25 +241,31 @@ export class CarouselPlugin extends BasePlugin {
                   ? value.map(
                       (item: {
                         type: string;
-                        content: string;
+                        content: any;
                         href?: string;
                         title?: string;
                         titleClassName?: string;
                         description?: string;
                         descriptionClassName?: string;
                       }) => {
-                        return item.type === 'html'
-                          ? {
-                              html: item.content
-                            }
-                          : {
-                              image: item.content,
-                              href: item.href,
-                              title: item.title,
-                              titleClassName: item.titleClassName,
-                              description: item.description,
-                              descriptionClassName: item.descriptionClassName
-                            };
+                        if (item.type === 'html') {
+                          return {
+                            html: item.content
+                          };
+                        } else if (item.type === 'container') {
+                          return {
+                            itemSchema: item.content?.itemSchema
+                          };
+                        } else {
+                          return {
+                            image: item.content,
+                            href: item.href,
+                            title: item.title,
+                            titleClassName: item.titleClassName,
+                            description: item.description,
+                            descriptionClassName: item.descriptionClassName
+                          };
+                        }
                       }
                     )
                   : [];
@@ -301,19 +360,20 @@ export class CarouselPlugin extends BasePlugin {
                 }),
                 {
                   type: 'ae-switch-more',
-                  bulk: true,
                   mode: 'normal',
                   name: 'multiple',
+                  bulk: false,
                   label: '多图展示',
                   formType: 'extend',
                   form: {
                     body: [
                       {
-                        name: 'multiple.count',
+                        name: 'count',
                         label: '数量',
                         type: 'input-number',
                         min: 2,
-                        step: 1
+                        step: 1,
+                        value: 5
                       }
                     ]
                   }
@@ -351,20 +411,20 @@ export class CarouselPlugin extends BasePlugin {
               title: '其他',
               body: [
                 {
-                  name: 'themeCss.baseControlClassName.--image-images-prev-icon',
+                  name: 'icons.prev',
                   label: '左切换图标',
                   type: 'icon-select',
-                  returnSvg: true
+                  pipeOut: undefinedPipeOut
                 },
                 {
-                  name: 'themeCss.baseControlClassName.--image-images-next-icon',
+                  name: 'icons.next',
                   label: '右切换图标',
                   type: 'icon-select',
-                  returnSvg: true
+                  pipeOut: undefinedPipeOut
                 },
-                getSchemaTpl('theme:select', {
+                getSchemaTpl('theme:size', {
                   label: '切换图标大小',
-                  name: 'themeCss.galleryControlClassName.width:default'
+                  name: 'themeCss.galleryControlClassName.size:default'
                 })
               ]
             },

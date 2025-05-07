@@ -30,7 +30,9 @@ import {
   renderTextByKeyword,
   getVariable,
   TestIdBuilder,
-  labelToString
+  labelToString,
+  setThemeClassName,
+  CustomStyle
 } from 'amis-core';
 import {findDOMNode} from 'react-dom';
 import xor from 'lodash/xor';
@@ -169,10 +171,18 @@ export default class NestedSelectControl extends React.Component<
 
   @autobind
   async dispatchEvent(eventName: string, eventData: any = {}) {
-    const {dispatchEvent} = this.props;
+    const {dispatchEvent, options, multiple, value, selectedOptions} =
+      this.props;
+
     const rendererEvent = await dispatchEvent(
       eventName,
-      resolveEventData(this.props, eventData)
+      resolveEventData(this.props, {
+        options,
+        items: options, // 为了保持名字统一
+        value,
+        selectedItems: multiple ? selectedOptions : selectedOptions[0],
+        ...eventData
+      })
     );
     // 返回阻塞标识
     return !!rendererEvent?.prevented;
@@ -185,12 +195,12 @@ export default class NestedSelectControl extends React.Component<
 
   @autobind
   handleOutClick(e: React.MouseEvent<any>) {
-    const {options} = this.props;
+    e.stopPropagation();
     this.outTargetWidth = this.outTarget.current?.clientWidth;
     e.defaultPrevented ||
-      this.setState({
-        isOpened: true
-      });
+      this.setState(prevState => ({
+        isOpened: !prevState.isOpened
+      }));
   }
 
   @autobind
@@ -208,29 +218,13 @@ export default class NestedSelectControl extends React.Component<
   }
 
   async removeItem(index: number, e?: React.MouseEvent<HTMLElement>) {
-    let {
-      onChange,
-      selectedOptions,
-      joinValues,
-      valueField,
-      extractValue,
-      delimiter,
-      value
-    } = this.props;
+    let {onChange, selectedOptions} = this.props;
 
     e && e.stopPropagation();
 
     selectedOptions.splice(index, 1);
 
-    if (joinValues) {
-      value = (selectedOptions as Options)
-        .map(item => item[valueField || 'value'])
-        .join(delimiter || ',');
-    } else if (extractValue) {
-      value = (selectedOptions as Options).map(
-        item => item[valueField || 'value']
-      );
-    }
+    const value = this.getValue();
 
     const isPrevented = await this.dispatchEvent('change', {
       value
@@ -313,7 +307,8 @@ export default class NestedSelectControl extends React.Component<
     }
 
     const isPrevented = await this.dispatchEvent('change', {
-      value
+      value,
+      selectedItems: option
     });
     isPrevented || onChange(value);
     isPrevented || this.handleResultClear();
@@ -438,7 +433,8 @@ export default class NestedSelectControl extends React.Component<
       ? value.map(item => item[valueField as string])
       : value;
     const isPrevented = await this.dispatchEvent('change', {
-      value: newValue
+      value: newValue,
+      selectedItems: option
     });
     isPrevented || onChange(newValue);
     isPrevented || this.handleResultClear();
@@ -468,9 +464,9 @@ export default class NestedSelectControl extends React.Component<
     });
   }
 
-  reload() {
+  reload(subpath?: string, query?: any) {
     const reload = this.props.reloadOptions;
-    reload && reload();
+    reload && reload(subpath, query);
   }
 
   @autobind
@@ -903,7 +899,9 @@ export default class NestedSelectControl extends React.Component<
       translate: __,
       classnames: cx,
       options,
-      render
+      render,
+      id,
+      themeCss
     } = this.props;
     const isSearch = !!this.state.inputValue;
     let noResultsText: any = this.props.noResultsText;
@@ -939,7 +937,19 @@ export default class NestedSelectControl extends React.Component<
         placement={'auto'}
         show
       >
-        <PopOver className={cx('NestedSelect-popover')}>{body}</PopOver>
+        <PopOver
+          className={cx(
+            'NestedSelect-popover',
+            setThemeClassName({
+              ...this.props,
+              name: 'nestedSelectPopoverClassName',
+              id,
+              themeCss: themeCss
+            })
+          )}
+        >
+          {body}
+        </PopOver>
       </Overlay>
     );
   }
@@ -969,10 +979,13 @@ export default class NestedSelectControl extends React.Component<
       overflowTagPopover
     } = this.props;
 
+    const {classPrefix: ns, themeCss, id} = this.props;
+
     return (
       <div
         className={cx('NestedSelectControl', className)}
         ref={this.outTarget}
+        style={style}
       >
         <ResultBox
           mobileUI={mobileUI}
@@ -982,15 +995,24 @@ export default class NestedSelectControl extends React.Component<
           ref={this.domRef}
           placeholder={__(placeholder ?? 'placeholder.empty')}
           inputPlaceholder={''}
-          className={cx(`NestedSelect`, {
-            'NestedSelect--inline': inline,
-            'NestedSelect--single': !multiple,
-            'NestedSelect--multi': multiple,
-            'NestedSelect--searchable': searchable,
-            'is-opened': this.state.isOpened,
-            'is-focused': this.state.isFocused,
-            [`NestedSelect--border${ucFirst(borderMode)}`]: borderMode
-          })}
+          className={cx(
+            `NestedSelect`,
+            {
+              'NestedSelect--inline': inline,
+              'NestedSelect--single': !multiple,
+              'NestedSelect--multi': multiple,
+              'NestedSelect--searchable': searchable,
+              'is-opened': this.state.isOpened,
+              'is-focused': this.state.isFocused,
+              [`NestedSelect--border${ucFirst(borderMode)}`]: borderMode
+            },
+            setThemeClassName({
+              ...this.props,
+              name: 'nestedSelectControlClassName',
+              id,
+              themeCss: themeCss
+            })
+          )}
           result={
             multiple
               ? selectedOptions
@@ -1037,6 +1059,45 @@ export default class NestedSelectControl extends React.Component<
         ) : this.state.isOpened ? (
           this.renderOuter()
         ) : null}
+
+        <CustomStyle
+          {...this.props}
+          config={{
+            themeCss: themeCss,
+            classNames: [
+              {
+                key: 'nestedSelectControlClassName',
+                weights: {
+                  hover: {
+                    suf: '.is-clickable:not(.is-disabled)'
+                  },
+                  focused: {
+                    suf: '.is-opened:not(.is-mobile)'
+                  },
+                  disabled: {
+                    suf: '.is-disabled'
+                  }
+                }
+              },
+              {
+                key: 'nestedSelectPopoverClassName',
+                weights: {
+                  default: {
+                    suf: ` .${ns}NestedSelect-option`
+                  },
+                  hover: {
+                    suf: ` .${ns}NestedSelect-option.is-highlight`
+                  },
+                  focused: {
+                    inner: `.${ns}NestedSelect-option.is-active`
+                  }
+                }
+              }
+            ],
+            id: id
+          }}
+          env={env}
+        />
       </div>
     );
   }

@@ -45,7 +45,7 @@ import type {
   RowSelectionProps,
   ExpandableProps,
   AutoFillHeightObject
-} from 'amis-ui/lib/components/table';
+} from 'amis-ui/lib/components/table/index';
 import {
   BaseSchema,
   SchemaObject,
@@ -146,6 +146,16 @@ export interface ColumnSchema {
    * 内容居左、居中、居右
    */
   align?: string;
+
+  /**
+   * 标题内容居左、居中、居右
+   */
+  headerAlign?: 'left' | 'center' | 'right';
+
+  /**
+   * 列垂直对齐方式
+   */
+  vAlign?: 'top' | 'middle' | 'bottom';
 
   /**
    * 是否固定在左侧/右侧
@@ -544,14 +554,16 @@ export default class Table2 extends React.Component<Table2Props, object> {
       rowSelection,
       keyField,
       primaryField,
-      canAccessSuperData
+      canAccessSuperData,
+      persistKey
     } = props;
 
     store.update({
       columnsTogglable,
       columns,
       canAccessSuperData,
-      rowSelectionKeyField: primaryField || rowSelection?.keyField || keyField
+      rowSelectionKeyField: primaryField || rowSelection?.keyField || keyField,
+      persistKey
     });
     Table2.syncRows(store, props, undefined) && this.syncSelected();
 
@@ -700,7 +712,7 @@ export default class Table2 extends React.Component<Table2Props, object> {
     const store = props.store;
 
     changedEffect(
-      ['orderBy', 'columnsTogglable', 'canAccessSuperData'],
+      ['orderBy', 'columnsTogglable', 'canAccessSuperData', 'persistKey'],
       prevProps,
       props,
       changes => {
@@ -820,12 +832,14 @@ export default class Table2 extends React.Component<Table2Props, object> {
 
       // title 不应该传递到 cell-field 的 column 中，否则部分组件会将其渲染出来
       // 但是 cell-field 需要这个字段，展示列的名称
-      const {width, children, title, ...rest} = schema;
+      const {width, children, wrapperComponent, title, ...rest} = schema;
 
       return render(
         'cell-field',
         {
           ...rest,
+          // 空字符串/null 被认为是正常的值，导致 defaultProps 不生效
+          wrapperComponent: wrapperComponent || undefined,
           title: title || rest.label,
           type: 'cell-field',
           column: rest,
@@ -894,21 +908,19 @@ export default class Table2 extends React.Component<Table2Props, object> {
         const clone = {...column} as any;
 
         let titleSchema: any = null;
+        const title = clone.title || clone.label;
         const titleProps = {
-          popOverContainer: popOverContainer || this.getPopOverContainer,
-          value: column.title || column.label
+          ...data,
+          popOverContainer: popOverContainer || this.getPopOverContainer
         };
         if (isObject(column.title)) {
           titleSchema = cloneDeep(column.title);
-        } else if (
-          typeof column.title === 'string' ||
-          typeof column.label === 'string'
-        ) {
-          titleSchema = {type: 'plain'};
+        } else if (typeof title === 'string') {
+          titleSchema = {type: 'plain', tpl: title};
         }
 
-        if (column.align) {
-          titleSchema.align = column.align;
+        if (column.headerAlign || column.align) {
+          titleSchema.align = column.headerAlign || column.align;
           titleSchema.className = 'flex-1';
         }
 
@@ -1304,7 +1316,7 @@ export default class Table2 extends React.Component<Table2Props, object> {
       {
         data: {
           ...this.props.data,
-          record,
+          ...record,
           rowIndex
         }
       }
@@ -1566,7 +1578,7 @@ export default class Table2 extends React.Component<Table2Props, object> {
     const {onAction} = this.props;
 
     // todo
-    onAction && onAction(e, action, ctx);
+    return onAction?.(e, action, ctx);
   }
 
   renderActions(region: string) {
@@ -1580,7 +1592,11 @@ export default class Table2 extends React.Component<Table2Props, object> {
       dispatchEvent
     } = this.props;
     actions = Array.isArray(actions) ? actions.concat() : [];
-    const config = isObject(columnsTogglable) ? columnsTogglable : {};
+    const config = isObject(columnsTogglable)
+      ? columnsTogglable
+      : {
+          align: 'left'
+        };
 
     // 现在默认从crud里传进来的columnsTogglable是boolean类型
     // table单独配置的是SchemaNode类型
@@ -1655,19 +1671,16 @@ export default class Table2 extends React.Component<Table2Props, object> {
   ): Promise<any> {
     const {dispatchEvent, data, store} = this.props;
 
-    const rendererEvent = await dispatchEvent(
+    store.updateSelected(selectedRowKeys);
+    this.syncSelected();
+
+    await dispatchEvent(
       'selectedChange',
       createObject(data, {
         selectedItems: selectedRows,
         unSelectedItems: unSelectedRows
       })
     );
-
-    if (rendererEvent?.prevented) {
-      return rendererEvent?.prevented;
-    }
-    store.updateSelected(selectedRowKeys);
-    this.syncSelected();
   }
 
   @autobind
